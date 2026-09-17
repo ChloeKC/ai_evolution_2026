@@ -1,0 +1,12 @@
+# Week 1 Lab — FULL. Everything above, plus what Weeks 3 onward need.
+# PyTorch alone is roughly 2 GB, so install this when you have the time and
+# the disk space, not five minutes before a lab.
+-r requirements.txt
+
+torch>=2.2
+transformers>=4.40
+datasets>=2.18
+huggingface_hub>=0.34      # provides the `hf` CLI (was `huggingface-cli`)
+ipywidgets>=8.0            # the interactive sliders in the notebooks
+
+# Not a pip package: install Ollama separately from https://ollama.com (Week 7)

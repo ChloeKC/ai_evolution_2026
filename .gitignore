@@ -1,0 +1,35 @@
+# Environments
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+
+# Secrets — never commit a token
+.env
+*.token
+secrets.*
+
+# Model weights and caches (large, and re-downloadable)
+*.safetensors
+*.gguf
+*.bin
+*.pt
+*.pth
+.cache/
+hf_cache/
+
+# Notebook noise
+.ipynb_checkpoints/
+
+# Generated output — regenerate with the scripts instead
+figures/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Submission tooling
+.student_number
+submission-week*.zip
