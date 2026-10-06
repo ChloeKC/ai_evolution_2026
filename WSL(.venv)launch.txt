@@ -1,4 +1,4 @@
- cd /mnt/c/Users/Chloe/Desktop/AI_Evolution/Week1Lab1/week1-lab
+cd /mnt/c/Users/Chloe/Desktop/AI_Evolution/Week1Lab1/week1-lab
 source .venv/bin/activate
 python3 setup_check.py
 python3 hello_models.py
