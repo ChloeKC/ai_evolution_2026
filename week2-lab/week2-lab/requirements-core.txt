@@ -1,0 +1,12 @@
+# Week 2 Lab: the five packages the lab genuinely cannot run without.
+#
+# requirements.txt adds shap, lime and ipywidgets on top of these. Those three
+# are convenience, not necessity: explain.py carries a from-scratch LIME, and
+# the notebook falls back to a plain loop if ipywidgets is missing. If the
+# optional install fails on your machine, install this file and carry on — the
+# lab will run end to end.
+numpy>=1.26
+pandas>=2.0
+scikit-learn>=1.3
+matplotlib>=3.7
+scipy>=1.11

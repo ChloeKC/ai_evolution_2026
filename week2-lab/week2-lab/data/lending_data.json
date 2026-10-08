@@ -1,0 +1,20 @@
+{
+  "n": 8000,
+  "seed": 1,
+  "mechanisms": {
+    "sampling_bias": true,
+    "historical_bias": true,
+    "proxy": true,
+    "label_bias": true
+  },
+  "features": [
+    "income",
+    "savings",
+    "employment_years",
+    "existing_debt",
+    "credit_history_months",
+    "postcode_score",
+    "age"
+  ],
+  "generator": "datasets.make_lending_data(n=8000, seed=1)"
+}

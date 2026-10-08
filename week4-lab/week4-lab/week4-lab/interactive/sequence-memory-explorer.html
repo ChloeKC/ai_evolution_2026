@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<!--
+  Sequence Memory Explorer
+  The Evolution of Machine Learning and AI, Week 4
+  South East Technological University
+
+  The third companion. A convolution shares weights across space; recurrence
+  shares them across time. This page shows what that costs: unroll a recurrent
+  network and watch the gradient to step 1 decay as a power of one matrix, then
+  open an LSTM's gates and watch the same signal survive.
+
+  Single file, no build step, no network. Embed with:
+  <iframe src="sequence-memory-explorer.html" width="100%" height="960"
+          style="border:0"></iframe>
+
+  Booklet cross-references: Chapters 12 to 16.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sequence Memory Explorer</title>
+<style>
+  :root{
+    --slate:#47546B; --slate-dark:#333F53; --ink:#22293A; --grey:#8A93A5;
+    --amber:#A96E08; --blue:#4E7291; --red:#9E3B2C; --green:#2E7D4F;
+    --key:#EDF0F5; --panel:#F7F9FC; --line:#E3E8F0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; padding:18px; color:var(--ink); background:#fff;
+       font:15px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}
+  h1{font-size:20px; margin:0 0 2px; color:var(--slate-dark)}
+  .sub{color:var(--grey); font-size:13px; margin-bottom:14px}
+  .tabs{display:flex; gap:4px; margin-bottom:12px; border-bottom:2px solid var(--line); flex-wrap:wrap}
+  .tab{padding:8px 14px; cursor:pointer; font-size:14px; font-weight:600;
+       color:var(--grey); border:0; background:none; border-bottom:3px solid transparent}
+  .tab.on{color:var(--slate-dark); border-bottom-color:var(--amber)}
+  .controls{display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;
+    background:var(--panel); border:1px solid var(--line); border-radius:6px;
+    padding:12px 14px; margin-bottom:12px}
+  .ctl{display:flex; flex-direction:column; gap:3px; min-width:155px}
+  .ctl label{font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--grey)}
+  .ctl .val{font-weight:700; color:var(--slate-dark); font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%; accent-color:var(--slate)}
+  select{padding:5px; border:1px solid var(--grey); border-radius:4px; background:#fff; font-size:13.5px}
+  button{padding:7px 13px; border:0; border-radius:5px; cursor:pointer;
+         font-size:13.5px; font-weight:600; color:#fff; background:var(--slate)}
+  button.ghost{background:#fff; color:var(--slate); border:1px solid var(--grey)}
+  .card{border:1px solid var(--line); border-radius:6px; padding:9px; background:#fff; margin-bottom:12px}
+  .card h2{font-size:11.5px; letter-spacing:.08em; text-transform:uppercase;
+           color:var(--grey); margin:2px 0 3px 3px}
+  .card p.cap{font-size:12px; color:var(--grey); margin:2px 3px 7px}
+  canvas{width:100%; display:block; border-radius:4px}
+  .panes{display:grid; gap:12px}
+  .p2{grid-template-columns:1fr 1fr}
+  @media(max-width:900px){.p2{grid-template-columns:1fr}}
+  .readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(125px,1fr)); gap:10px}
+  .stat{background:var(--key); border-radius:5px; padding:9px 11px}
+  .stat .k{font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--grey)}
+  .stat .v{font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--slate-dark)}
+  .msg{margin-top:10px; padding:11px 13px; border-radius:5px;
+       border-left:4px solid var(--slate); background:var(--key); font-size:14.5px}
+  .note{margin-top:12px; font-size:13px; color:var(--grey)}
+  .hide{display:none}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px;
+        background:var(--panel); border:1px solid var(--line); border-radius:5px;
+        padding:9px 10px; color:var(--slate-dark); white-space:pre; overflow-x:auto}
+  table.kt{border-collapse:collapse; width:100%; font-size:12.5px}
+  table.kt td,table.kt th{border:1px solid var(--line); padding:4px 7px; text-align:right}
+  table.kt th{background:var(--key); color:var(--slate-dark); font-size:11px;
+              text-transform:uppercase; letter-spacing:.05em; text-align:left}
+  table.kt td:first-child,table.kt th:first-child{text-align:left}
+</style>
+</head>
+<body>
+
+<h1>Sequence Memory Explorer</h1>
+<div class="sub">Week 4 &middot; The Evolution of Machine Learning and AI &middot; booklet chapters 12 to 16</div>
+
+<div class="tabs">
+  <button class="tab on" data-tab="decay">1. The gradient through time</button>
+  <button class="tab" data-tab="gates">2. What a gate does</button>
+  <button class="tab" data-tab="unroll">3. Unrolling, and weight sharing</button>
+</div>
+
+<!-- ==================== TAB 1 ==================== -->
+<div id="tab-decay">
+<div class="controls">
+  <div class="ctl">
+    <label for="scale">Recurrent weight scale &ndash; <span class="val" id="scaleVal">0.90</span></label>
+    <input type="range" id="scale" min="0.3" max="1.5" step="0.01" value="0.9">
+  </div>
+  <div class="ctl">
+    <label for="steps">Sequence length &ndash; <span class="val" id="stepsVal">60</span></label>
+    <input type="range" id="steps" min="5" max="150" step="5" value="60">
+  </div>
+  <div class="ctl">
+    <label for="forget">LSTM forget gate &ndash; <span class="val" id="forgetVal">0.95</span></label>
+    <input type="range" id="forget" min="0.5" max="1" step="0.01" value="0.95">
+  </div>
+  <div class="ctl">
+    <label for="showLstm">Compare against</label>
+    <select id="showLstm">
+      <option value="both" selected>plain RNN and LSTM cell</option>
+      <option value="rnn">plain RNN only</option>
+    </select>
+  </div>
+</div>
+<div class="panes p2">
+  <div class="card">
+    <h2>How much does the end of the sequence still know about the start?</h2>
+    <p class="cap">The size of the gradient from step T back to step 1, on a logarithmic scale.</p>
+    <canvas id="cDecay" height="340"></canvas>
+  </div>
+  <div class="card">
+    <h2>The same thing, as a chain of multiplications</h2>
+    <p class="cap">Each block is one step's contribution. Watch the product shrink or grow.</p>
+    <canvas id="cChain" height="340"></canvas>
+  </div>
+</div>
+<div class="readout">
+  <div class="stat"><div class="k">RNN, gradient at step 1</div><div class="v" id="sRnn">0</div></div>
+  <div class="stat"><div class="k">LSTM, gradient at step 1</div><div class="v" id="sLstm">0</div></div>
+  <div class="stat"><div class="k">Ratio</div><div class="v" id="sRatio">0</div></div>
+  <div class="stat"><div class="k">Verdict</div><div class="v" id="sVerd" style="font-size:14px">-</div></div>
+</div>
+<div class="msg" id="msg1"></div>
+<div class="note">
+  <b>Worth doing.</b> Set the scale to 0.90 and the length to 20: the gradient survives, and a vanilla RNN
+  can learn this. Now drag the length to 150 without touching anything else. Nothing about the model
+  changed, but the task became unlearnable, because the same matrix has now been multiplied by itself 150
+  times. Then push the scale to 1.1 and watch the opposite failure: the product runs away, which is the
+  <b>exploding</b> gradient, and it is the reason gradient clipping exists. The usable band is a knife edge,
+  and it is not a band you can reliably arrange in advance.
+</div>
+</div>
+
+<!-- ==================== TAB 2 ==================== -->
+<div id="tab-gates" class="hide">
+<div class="controls">
+  <div class="ctl">
+    <label for="gf">Forget gate f &ndash; <span class="val" id="gfVal">0.90</span></label>
+    <input type="range" id="gf" min="0" max="1" step="0.01" value="0.9">
+  </div>
+  <div class="ctl">
+    <label for="gi">Input gate i &ndash; <span class="val" id="giVal">0.30</span></label>
+    <input type="range" id="gi" min="0" max="1" step="0.01" value="0.3">
+  </div>
+  <div class="ctl">
+    <label for="go">Output gate o &ndash; <span class="val" id="goVal">1.00</span></label>
+    <input type="range" id="go" min="0" max="1" step="0.01" value="1">
+  </div>
+  <div class="ctl">
+    <label for="task">The input stream</label>
+    <select id="task">
+      <option value="onehit" selected>one important value at step 3, then noise</option>
+      <option value="steady">a steady signal throughout</option>
+      <option value="two">two important values, far apart</option>
+    </select>
+  </div>
+</div>
+<div class="card">
+  <h2>The cell value over time, and what the gates did to it</h2>
+  <p class="cap">c(t) = f &middot; c(t&minus;1) + i &middot; g(t). The old cell is multiplied and added to, never
+  pushed through a weight matrix and a squashing function. That is the whole idea.</p>
+  <canvas id="cCell" height="330"></canvas>
+</div>
+<div class="panes p2">
+  <div class="card">
+    <h2>The arithmetic, step by step</h2>
+    <div class="mono" id="cellMath"></div>
+  </div>
+  <div class="card">
+    <h2>How long the memory lasts</h2>
+    <div id="halfLife"></div>
+  </div>
+</div>
+<div class="msg" id="msg2"></div>
+<div class="note">
+  <b>The point.</b> In a plain RNN the rate at which the past fades is fixed by the weights, the same for
+  every input and every dimension, and set during training for the average case. In an LSTM the forget gate
+  is computed fresh at every step from the current input, so the network can decide <i>this is worth
+  keeping</i> and <i>this is noise</i> on a case-by-case basis. Gates are not extra capacity. They are
+  learned control over how fast the past is forgotten, and that is why an LSTM has three of them.
+</div>
+</div>
+
+<!-- ==================== TAB 3 ==================== -->
+<div id="tab-unroll" class="hide">
+<div class="controls">
+  <div class="ctl">
+    <label for="T3">Sequence length &ndash; <span class="val" id="T3Val">6</span></label>
+    <input type="range" id="T3" min="3" max="12" step="1" value="6">
+  </div>
+  <div class="ctl">
+    <label for="hid">Hidden units &ndash; <span class="val" id="hidVal">4</span></label>
+    <input type="range" id="hid" min="2" max="8" step="1" value="4">
+  </div>
+  <div class="ctl">
+    <label for="vocab">Input width &ndash; <span class="val" id="vocabVal">5</span></label>
+    <input type="range" id="vocab" min="2" max="12" step="1" value="5">
+  </div>
+</div>
+<div class="card">
+  <h2>The same network, unrolled</h2>
+  <p class="cap">Every copy of W below is the <b>same</b> matrix, not a different one. That is weight
+  sharing across time, and it is why the parameter count does not depend on the sequence length.</p>
+  <canvas id="cUnroll" height="300"></canvas>
+</div>
+<div class="panes p2">
+  <div class="card">
+    <h2>Parameters, counted</h2>
+    <div id="paramTable"></div>
+  </div>
+  <div class="card">
+    <h2>The comparison worth remembering</h2>
+    <div class="msg" style="margin-top:0" id="msg3"></div>
+  </div>
+</div>
+<div class="note">
+  A CNN shares one small kernel across every position in space. An RNN shares one weight matrix across
+  every position in time. They are the same idea applied to different axes, and both buy the same two
+  things: a parameter count that does not grow with the input size, and the ability to handle inputs longer
+  or larger than anything seen in training. The difference is what they pay. A CNN's positions are
+  independent, so they compute in parallel. An RNN's steps depend on each other, so they cannot, and that
+  single fact is most of why transformers displaced recurrence once the hardware became wide rather than
+  fast.
+</div>
+</div>
+
+<script>
+"use strict";
+const C = { slate:"#47546B", grey:"#8A93A5", amber:"#A96E08", blue:"#4E7291",
+            red:"#9E3B2C", green:"#2E7D4F", key:"#EDF0F5", line:"#E3E8F0" };
+const el = id => document.getElementById(id);
+
+function fitCanvas(cv, cssH){
+  const w = cv.parentElement.clientWidth - 20;
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.max(120, Math.round(w*dpr));
+  cv.height = Math.round(cssH*dpr);
+  cv.style.height = cssH+"px";
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,cssH);
+  return {ctx, w, h:cssH};
+}
+
+/* ============ TAB 1: gradient decay ============ */
+/* The real measurement, the same one sequences.py performs in numpy.
+
+   Unroll a recurrent network for T steps and accumulate the Jacobian
+
+       J_t = D_t W D_(t-1) W ... D_1 W        where D = diag(1 - tanh^2)
+
+   then report its largest singular value, found by power iteration. This is
+   not a model of the decay or a curve fitted to it: it is the quantity itself,
+   computed here in the browser from an actual random weight matrix. The
+   generator differs from numpy's, so the digits differ from the Python lab's
+   table, but the behaviour is the same phenomenon measured the same way: at
+   scale 0.5 the norm falls past 1e-16 within sixty steps, and near scale 1.0
+   it wanders without a trend, which is the knife edge.
+
+   The LSTM line is the gradient along the cell path, which the mathematics of
+   the cell gives exactly as the product of the forget gates. That is the whole
+   reason the cell exists. */
+
+const HID = 32;
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function gauss(rand){
+  let u = 0, v = 0;
+  while (u === 0) u = rand();
+  while (v === 0) v = rand();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+}
+function specNorm(J, n, iters){
+  let v = new Float64Array(n).fill(1/Math.sqrt(n));
+  let sigma = 0;
+  for (let it=0; it<iters; it++){
+    const Jv = new Float64Array(n);
+    for (let i=0;i<n;i++){ let s=0; const row=J[i]; for (let j=0;j<n;j++) s+=row[j]*v[j]; Jv[i]=s; }
+    const JtJv = new Float64Array(n);
+    for (let j=0;j<n;j++){ let s=0; for (let i=0;i<n;i++) s+=J[i][j]*Jv[i]; JtJv[j]=s; }
+    let nrm = 0; for (let j=0;j<n;j++) nrm += JtJv[j]*JtJv[j];
+    nrm = Math.sqrt(nrm);
+    if (nrm < 1e-300) return 0;
+    for (let j=0;j<n;j++) v[j] = JtJv[j]/nrm;
+    let s2 = 0;
+    for (let i=0;i<n;i++){ let s=0; const row=J[i]; for (let j=0;j<n;j++) s+=row[j]*v[j]; s2 += s*s; }
+    sigma = Math.sqrt(s2);
+  }
+  return sigma;
+}
+let DECAY_CACHE = {};
+function decayCurves(){
+  const s = +el("scale").value, T = +el("steps").value, f = +el("forget").value;
+  const key = s.toFixed(2) + "|" + T;
+  if (!DECAY_CACHE[key]){
+    const rand = mulberry32(12345);
+    const sd = s/Math.sqrt(HID);
+    const W = Array.from({length:HID}, () => {
+      const r = new Float64Array(HID);
+      for (let j=0;j<HID;j++) r[j] = gauss(rand)*sd;
+      return r;
+    });
+    let h = new Float64Array(HID);
+    for (let i=0;i<HID;i++) h[i] = gauss(rand)*0.5;
+    let J = Array.from({length:HID}, (_,i) => {
+      const r = new Float64Array(HID); r[i] = 1; return r;
+    });
+    const out = [];
+    for (let t=0;t<T;t++){
+      const pre = new Float64Array(HID);
+      for (let i=0;i<HID;i++){ let acc=0; const row=W[i]; for (let j=0;j<HID;j++) acc+=row[j]*h[j]; pre[i]=acc; }
+      const hn = new Float64Array(HID);
+      for (let i=0;i<HID;i++) hn[i] = Math.tanh(pre[i]);
+      const d = new Float64Array(HID);
+      for (let i=0;i<HID;i++) d[i] = 1 - hn[i]*hn[i];
+      // J <- diag(d) W J
+      const WJ = Array.from({length:HID}, () => new Float64Array(HID));
+      for (let i=0;i<HID;i++){
+        const row = W[i], dst = WJ[i];
+        for (let k=0;k<HID;k++){
+          const wik = row[k];
+          if (wik === 0) continue;
+          const Jk = J[k];
+          for (let j=0;j<HID;j++) dst[j] += wik*Jk[j];
+        }
+        for (let j=0;j<HID;j++) dst[j] *= d[i];
+      }
+      J = WJ; h = hn;
+      out.push(Math.max(specNorm(J, HID, 12), 1e-40));
+    }
+    DECAY_CACHE[key] = out;
+  }
+  const rnn = DECAY_CACHE[key];
+  const lstm = [];
+  let q = 1;
+  for (let t=1;t<=T;t++){ q *= f; lstm.push(Math.max(q, 1e-40)); }
+  const perStep = Math.pow(rnn[rnn.length-1], 1/T);
+  return {rnn, lstm, perStep, T, f};
+}
+function drawDecay(){
+  el("scaleVal").textContent = (+el("scale").value).toFixed(2);
+  el("stepsVal").textContent = el("steps").value;
+  el("forgetVal").textContent = (+el("forget").value).toFixed(2);
+  const {rnn, lstm, perStep, T, f} = decayCurves();
+  const both = el("showLstm").value === "both";
+
+  {
+    const {ctx, w} = fitCanvas(el("cDecay"), 340);
+    const L = 64, R = 14, Tp = 16, B = 42;
+    const pw = w-L-R, ph = 340-Tp-B;
+    const loE = -18, hiE = 4;
+    const yOf = v => Tp + ph - (Math.log10(Math.max(v,1e-40))-loE)/(hiE-loE)*ph;
+    const xOf = t => L + (t-1)/Math.max(1,T-1)*pw;
+    // danger zone
+    ctx.fillStyle = "rgba(158,61,44,0.07)";
+    ctx.fillRect(L, yOf(1e-4), pw, Tp+ph-yOf(1e-4));
+    ctx.strokeStyle = C.line;
+    for (let e=hiE; e>=loE; e-=4){
+      const y = yOf(Math.pow(10,e));
+      ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(L+pw,y); ctx.stroke();
+      ctx.fillStyle = C.grey; ctx.font = "9.5px Helvetica"; ctx.textAlign = "right";
+      ctx.fillText("1e"+e, L-5, y+3);
+    }
+    ctx.strokeStyle = C.grey; ctx.setLineDash([4,3]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(L, yOf(1)); ctx.lineTo(L+pw, yOf(1)); ctx.stroke();
+    ctx.setLineDash([]);
+    const series = both ? [[rnn,C.amber,"plain RNN"],[lstm,C.slate,"LSTM cell path"]]
+                        : [[rnn,C.amber,"plain RNN"]];
+    for (const [arr,col,name] of series){
+      ctx.strokeStyle = col; ctx.lineWidth = 2.6; ctx.beginPath();
+      arr.forEach((v,i) => { const y = yOf(v); i ? ctx.lineTo(xOf(i+1),y) : ctx.moveTo(xOf(1),y); });
+      ctx.stroke();
+    }
+    ctx.fillStyle = C.red; ctx.font = "10.5px Helvetica"; ctx.textAlign = "left";
+    ctx.fillText("below here, step 1 is invisible from step T", L+8, yOf(1e-6));
+    let ly = Tp+12;
+    for (const [,col,name] of series){
+      ctx.fillStyle = col; ctx.font = "700 11.5px Helvetica";
+      ctx.fillText(name, L+8, ly); ly += 15;
+    }
+    ctx.fillStyle = C.grey; ctx.font = "10.5px Helvetica"; ctx.textAlign = "center";
+    ctx.fillText("steps back through time", L+pw/2, 340-B+30);
+    [1, Math.round(T/2), T].forEach(t => ctx.fillText(t, xOf(t), 340-B+14));
+  }
+  {
+    const {ctx, w} = fitCanvas(el("cChain"), 340);
+    const n = Math.min(T, 24);
+    const bw = (w-30)/n;
+    ctx.font = "9.5px Helvetica"; ctx.textAlign = "center";
+    ctx.fillStyle = C.slate; ctx.font = "700 11.5px Helvetica"; ctx.textAlign = "left";
+    ctx.fillText(`per-step factor: ${perStep.toFixed(3)}   (RNN)`, 12, 16);
+    ctx.fillText(`per-step factor: ${f.toFixed(3)}   (LSTM forget gate)`, 12, 32);
+    ctx.font = "9.5px Helvetica"; ctx.textAlign = "center";
+    for (let i=0;i<n;i++){
+      const yTop = 52;
+      ctx.fillStyle = perStep < 1 ? C.amber : C.red;
+      ctx.globalAlpha = 0.25 + 0.7*Math.min(1, Math.pow(perStep, i+1));
+      ctx.fillRect(16+i*bw+1, yTop, bw-2, 58);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = C.slate;
+      ctx.globalAlpha = 0.25 + 0.7*Math.min(1, Math.pow(f, i+1));
+      ctx.fillRect(16+i*bw+1, yTop+96, bw-2, 58);
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = C.grey; ctx.textAlign = "left"; ctx.font = "10.5px Helvetica";
+    ctx.fillText("RNN: the same matrix, over and over", 16, 124);
+    ctx.fillText("LSTM: the cell path, multiplied only by the forget gate", 16, 220);
+    ctx.fillStyle = C.slate; ctx.font = "11.5px Helvetica";
+    ctx.fillText(`After ${T} steps the RNN product is ${decayCurves().rnn[T-1].toExponential(1)}`, 16, 258);
+    ctx.fillText(`and the LSTM cell path is ${decayCurves().lstm[T-1].toExponential(1)}.`, 16, 276);
+    ctx.fillStyle = C.grey; ctx.font = "10.5px Helvetica";
+    ctx.fillText("Nothing here is a bug in anyone's code.", 16, 302);
+    ctx.fillText("It is what a repeated product does.", 16, 318);
+  }
+
+  const r = rnn[rnn.length-1], l = lstm[lstm.length-1];
+  el("sRnn").textContent = r.toExponential(1);
+  el("sLstm").textContent = l.toExponential(1);
+  el("sRatio").textContent = (l/r).toExponential(1);
+  const vanish = r < 1e-4, explode = r > 1e3;
+  el("sVerd").textContent = vanish ? "RNN vanishes" : explode ? "RNN explodes" : "RNN usable";
+  el("sVerd").style.color = (vanish||explode) ? C.red : C.green;
+  el("msg1").innerHTML = vanish
+    ? `The gradient reaching step 1 is <b>${r.toExponential(1)}</b>. The loss at the end of the sequence is
+       effectively independent of what happened at the start, so no amount of training will teach the model
+       a dependency across that distance. The LSTM's cell path, multiplied only by its forget gate, still
+       delivers <b>${l.toExponential(1)}</b>, which is ${(l/r).toExponential(1)} times larger.`
+    : explode
+    ? `The product has run away to <b>${r.toExponential(1)}</b>. This is the <b>exploding</b> gradient: one
+       step will move every weight an enormous distance and the loss will very likely become
+       <code>nan</code>. Clipping caps the size of the step while keeping its direction, which is a patch
+       rather than a cure.`
+    : `At this scale and this length the product is <b>${r.toExponential(1)}</b>, which is a usable
+       gradient, and a plain RNN can learn this dependency. Now increase the length and watch how quickly
+       that stops being true.`;
+}
+
+/* ============ TAB 2: gates ============ */
+function drawGates(){
+  const f = +el("gf").value, i = +el("gi").value, o = +el("go").value;
+  el("gfVal").textContent = f.toFixed(2);
+  el("giVal").textContent = i.toFixed(2);
+  el("goVal").textContent = o.toFixed(2);
+  const T = 40, task = el("task").value;
+  const g = [];
+  for (let t=0;t<T;t++){
+    if (task === "onehit") g.push(t === 3 ? 1.0 : 0.04*Math.sin(t*2.1));
+    else if (task === "steady") g.push(0.35 + 0.1*Math.sin(t*0.7));
+    else g.push((t === 3 || t === 22) ? 1.0 : 0.04*Math.sin(t*2.1));
+  }
+  const c = [], h = [];
+  let cv = 0;
+  for (let t=0;t<T;t++){
+    cv = f*cv + i*g[t];
+    c.push(cv);
+    h.push(o*Math.tanh(cv));
+  }
+
+  const {ctx, w} = fitCanvas(el("cCell"), 330);
+  const L = 52, R = 14, Tp = 26, B = 40;
+  const pw = w-L-R, ph = 330-Tp-B;
+  const mx = Math.max(1e-6, ...c.map(Math.abs), ...g.map(Math.abs), 1);
+  const yOf = v => Tp + ph/2 - v/mx*(ph/2 - 6);
+  const xOf = t => L + t/(T-1)*pw;
+  ctx.strokeStyle = C.line; ctx.beginPath(); ctx.moveTo(L, yOf(0)); ctx.lineTo(L+pw, yOf(0)); ctx.stroke();
+  // input bars
+  for (let t=0;t<T;t++){
+    const big = Math.abs(g[t]) > 0.5;
+    ctx.fillStyle = big ? C.amber : C.line;
+    const y0 = yOf(0), y1 = yOf(g[t]);
+    ctx.fillRect(xOf(t)-2.4, Math.min(y0,y1), 4.8, Math.abs(y1-y0)+0.6);
+  }
+  // cell
+  ctx.strokeStyle = C.slate; ctx.lineWidth = 2.8; ctx.beginPath();
+  c.forEach((v,t) => t ? ctx.lineTo(xOf(t), yOf(v)) : ctx.moveTo(xOf(0), yOf(v)));
+  ctx.stroke();
+  // hidden
+  ctx.strokeStyle = C.green; ctx.lineWidth = 1.8; ctx.setLineDash([5,3]); ctx.beginPath();
+  h.forEach((v,t) => t ? ctx.lineTo(xOf(t), yOf(v)) : ctx.moveTo(xOf(0), yOf(v)));
+  ctx.stroke(); ctx.setLineDash([]);
+  ctx.font = "700 11.5px Helvetica"; ctx.textAlign = "left";
+  ctx.fillStyle = C.amber; ctx.fillText("input worth remembering", L+6, Tp-10);
+  ctx.fillStyle = C.slate;  ctx.fillText("cell c(t)", L+190, Tp-10);
+  ctx.fillStyle = C.green;  ctx.fillText("visible state h(t)", L+280, Tp-10);
+  ctx.fillStyle = C.grey; ctx.font = "10.5px Helvetica"; ctx.textAlign = "center";
+  ctx.fillText("time step", L+pw/2, 330-B+28);
+  [0,10,20,30,39].forEach(t => ctx.fillText(t, xOf(t), 330-B+13));
+
+  const hl = f >= 1 ? Infinity : Math.log(0.5)/Math.log(f);
+  el("cellMath").textContent =
+`c(t) = f * c(t-1) + i * g(t)
+h(t) = o * tanh(c(t))
+
+f = ${f.toFixed(2)}   i = ${i.toFixed(2)}   o = ${o.toFixed(2)}
+
+step 3  : g = 1.000  ->  c = ${c[3].toFixed(4)}
+step 10 : g = ${g[10].toFixed(3)}  ->  c = ${c[10].toFixed(4)}
+step 20 : g = ${g[20].toFixed(3)}  ->  c = ${c[20].toFixed(4)}
+step 39 : g = ${g[39].toFixed(3)}  ->  c = ${c[39].toFixed(4)}
+
+fraction of step 3 surviving to step 39:
+    f^36 = ${Math.pow(f,36).toExponential(2)}`;
+
+  let html = '<table class="kt"><tr><th>forget gate f</th><th>half life</th><th>1% left after</th></tr>';
+  for (const ff of [0.5, 0.8, 0.9, 0.95, 0.99, 0.999]){
+    const half = Math.log(0.5)/Math.log(ff), one = Math.log(0.01)/Math.log(ff);
+    const hit = Math.abs(ff-f) < 0.006;
+    html += `<tr style="${hit?`background:${C.key};font-weight:700`:""}"><td>${ff}</td>` +
+            `<td>${half.toFixed(1)} steps</td><td>${one.toFixed(0)} steps</td></tr>`;
+  }
+  html += "</table>";
+  html += `<div style="font-size:12.5px;color:${C.grey};margin-top:8px">
+    A forget gate of 0.999 keeps 1% of a signal for ${(Math.log(0.01)/Math.log(0.999)).toFixed(0)} steps.
+    A plain RNN cannot choose this number; an LSTM computes it fresh at every step, for every dimension,
+    from the input it is currently looking at.</div>`;
+  el("halfLife").innerHTML = html;
+
+  el("msg2").innerHTML = f > 0.97
+    ? `With f = ${f.toFixed(2)} the memory half life is <b>${hl.toFixed(0)} steps</b>. The spike at step 3
+       is still clearly present at step 39, which is exactly what the memory task in
+       <code>sequences.py</code> needs.`
+    : f < 0.7
+    ? `With f = ${f.toFixed(2)} the half life is only <b>${hl.toFixed(1)} steps</b>. The cell forgets almost
+       immediately, which is the behaviour of a plain RNN with small weights, and the long-range dependency
+       is lost.`
+    : `Half life <b>${hl.toFixed(1)} steps</b>. Drag f towards 1 and watch the spike at step 3 persist to
+       the end of the sequence. This is why the forget gate's bias is usually initialised
+       <b>positive</b>: start by remembering nearly everything, then learn what to discard.`;
+}
+
+/* ============ TAB 3: unrolling ============ */
+function drawUnroll(){
+  const T = +el("T3").value, H = +el("hid").value, V = +el("vocab").value;
+  el("T3Val").textContent = T; el("hidVal").textContent = H; el("vocabVal").textContent = V;
+
+  const {ctx, w} = fitCanvas(el("cUnroll"), 300);
+  const pad = 26;
+  const step = (w-2*pad)/T;
+  const yH = 130, yX = 232, yO = 44;
+  ctx.font = "11px Helvetica"; ctx.textAlign = "center";
+  for (let t=0;t<T;t++){
+    const x = pad + step*(t+0.5);
+    // input
+    ctx.fillStyle = C.key;
+    ctx.fillRect(x-15, yX-13, 30, 26);
+    ctx.strokeStyle = C.grey; ctx.lineWidth = 1; ctx.strokeRect(x-15, yX-13, 30, 26);
+    ctx.fillStyle = C.slate; ctx.fillText(`x${t+1}`, x, yX+4);
+    // hidden
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = C.slate; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.roundRect(x-19, yH-19, 38, 38, 7); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = C.slate_dark || C.slate;
+    ctx.fillText(`h${t+1}`, x, yH+4);
+    // arrows up
+    ctx.strokeStyle = C.grey; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(x, yX-14); ctx.lineTo(x, yH+20); ctx.stroke();
+    ctx.fillStyle = C.grey; ctx.beginPath();
+    ctx.moveTo(x, yH+20); ctx.lineTo(x-3.5, yH+27); ctx.lineTo(x+3.5, yH+27); ctx.fill();
+    // W arrows across
+    if (t < T-1){
+      const x2 = pad + step*(t+1.5);
+      ctx.strokeStyle = C.amber; ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.moveTo(x+20, yH); ctx.lineTo(x2-24, yH); ctx.stroke();
+      ctx.fillStyle = C.amber;
+      ctx.beginPath(); ctx.moveTo(x2-19, yH); ctx.lineTo(x2-26, yH-4); ctx.lineTo(x2-26, yH+4); ctx.fill();
+      ctx.font = "700 10.5px Helvetica";
+      ctx.fillText("W", (x+x2)/2, yH-7);
+      ctx.font = "11px Helvetica";
+    }
+  }
+  // output at the last step
+  const xl = pad + step*(T-0.5);
+  ctx.strokeStyle = C.green; ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.moveTo(xl, yH-20); ctx.lineTo(xl, yO+13); ctx.stroke();
+  ctx.fillStyle = C.green;
+  ctx.beginPath(); ctx.moveTo(xl, yO+13); ctx.lineTo(xl-4, yO+20); ctx.lineTo(xl+4, yO+20); ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.strokeStyle = C.green;
+  ctx.beginPath(); ctx.roundRect(xl-30, yO-14, 60, 28, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = C.green; ctx.font = "700 11.5px Helvetica";
+  ctx.fillText("prediction", xl, yO+4);
+  ctx.fillStyle = C.amber; ctx.textAlign = "left"; ctx.font = "700 12px Helvetica";
+  ctx.fillText(`every W above is the SAME ${H} by ${H} matrix`, pad, 288);
+
+  const rnnP = V*H + H*H + H;
+  const lstmP = 4*((V+H)*H + H);
+  const mlpP = (V*T)*H + H;          // a dense net on the flattened sequence
+  let html = '<table class="kt"><tr><th>model</th><th>parameters</th><th>grows with T?</th></tr>';
+  html += `<tr><td>RNN (shared W)</td><td>${rnnP.toLocaleString()}</td><td style="color:${C.green};font-weight:700">no</td></tr>`;
+  html += `<tr><td>LSTM (4 gates)</td><td>${lstmP.toLocaleString()}</td><td style="color:${C.green};font-weight:700">no</td></tr>`;
+  html += `<tr><td>dense net on the flattened sequence</td><td>${mlpP.toLocaleString()}</td><td style="color:${C.red};font-weight:700">yes, linearly</td></tr>`;
+  html += "</table>";
+  html += `<div style="font-size:12.5px;color:${C.grey};margin-top:8px">
+    At T = ${T} the dense network already needs ${(mlpP/rnnP).toFixed(1)} times the parameters, and it can
+    only ever accept sequences of exactly length ${T}. The recurrent models accept any length at all.</div>`;
+  el("paramTable").innerHTML = html;
+
+  el("msg3").innerHTML =
+    `An RNN reads a sequence of any length with a fixed parameter count, because it reuses one matrix at
+     every step. That is exactly what a convolution does with one kernel at every position. Both are
+     <b>weight sharing</b>, and weight sharing is always the same bargain: fewer parameters and better
+     generalisation, in exchange for committing to an assumption. Here the assumption is that
+     <b>the rule for updating your understanding does not change as you read</b>. For most sequences that is
+     true, and it is why the trick works.`;
+}
+
+/* ============ wiring ============ */
+function redraw(){
+  const on = document.querySelector(".tab.on").dataset.tab;
+  if (on === "decay") drawDecay();
+  if (on === "gates") drawGates();
+  if (on === "unroll") drawUnroll();
+}
+document.querySelectorAll(".tab").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    for (const t of ["decay","gates","unroll"])
+      el("tab-"+t).classList.toggle("hide", t !== b.dataset.tab);
+    redraw();
+  };
+});
+["scale","steps","forget"].forEach(id => el(id).oninput = drawDecay);
+el("showLstm").onchange = drawDecay;
+["gf","gi","go"].forEach(id => el(id).oninput = drawGates);
+el("task").onchange = drawGates;
+["T3","hid","vocab"].forEach(id => el(id).oninput = drawUnroll);
+window.addEventListener("resize", redraw);
+
+if (!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
+    this.beginPath();
+    this.moveTo(x+r,y); this.arcTo(x+w,y,x+w,y+h,r); this.arcTo(x+w,y+h,x,y+h,r);
+    this.arcTo(x,y+h,x,y,r); this.arcTo(x,y,x+w,y,r); this.closePath();
+  };
+}
+redraw();
+</script>
+</body>
+</html>

@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<!--
+  Gradient Descent Explorer
+  The Evolution of Machine Learning and AI, Week 3
+  South East Technological University
+
+  Single file. No build step, no CDN, no network. Open it in a browser, or
+  embed it in Tutors with:  <iframe src="gradient-descent-explorer.html"
+  width="100%" height="720" style="border:0"></iframe>
+
+  Booklet cross-references: Chapters 11, 12 and 13.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gradient Descent Explorer</title>
+<style>
+  :root{
+    --slate:#47546B; --slate-dark:#333F53; --ink:#22293A; --grey:#8A93A5;
+    --amber:#A96E08; --amber-bg:#FBF1DC; --blue:#4E7291; --blue-bg:#E7EFF5;
+    --red:#9E3B2C; --red-bg:#F9E9E4; --green:#2E7D4F; --green-bg:#E3F2EA;
+    --key:#EDF0F5; --panel:#F7F9FC;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:18px; color:var(--ink); background:#fff;
+    font:15px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;
+  }
+  h1{font-size:20px; margin:0 0 2px; color:var(--slate-dark)}
+  .sub{color:var(--grey); font-size:13px; margin-bottom:14px}
+  .tabs{display:flex; gap:6px; margin-bottom:12px}
+  .tab{
+    padding:7px 14px; border:1px solid var(--grey); border-radius:5px;
+    background:#fff; cursor:pointer; font-size:13.5px; color:var(--slate);
+  }
+  .tab[aria-selected="true"]{background:var(--slate); color:#fff; border-color:var(--slate)}
+  .controls{
+    display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;
+    background:var(--panel); border:1px solid #E3E8F0; border-radius:6px;
+    padding:12px 14px; margin-bottom:12px;
+  }
+  .ctl{display:flex; flex-direction:column; gap:3px; min-width:170px}
+  .ctl label{font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--grey)}
+  .ctl .val{font-weight:700; color:var(--slate-dark); font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%; accent-color:var(--slate)}
+  select{padding:5px; border:1px solid var(--grey); border-radius:4px; background:#fff; font-size:13.5px}
+  .btns{display:flex; gap:6px}
+  button{
+    padding:7px 13px; border:0; border-radius:5px; cursor:pointer;
+    font-size:13.5px; font-weight:600; color:#fff; background:var(--slate);
+  }
+  button.ghost{background:#fff; color:var(--slate); border:1px solid var(--grey)}
+  button:disabled{opacity:.45; cursor:default}
+  .panes{display:grid; grid-template-columns:1.45fr 1fr; gap:14px}
+  @media(max-width:840px){.panes{grid-template-columns:1fr}}
+  .card{border:1px solid #E3E8F0; border-radius:6px; padding:8px; background:#fff}
+  .card h2{font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+           color:var(--grey); margin:2px 0 6px 4px}
+  canvas{width:100%; display:block; border-radius:4px}
+  .readout{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+    gap:10px; margin-top:12px;
+  }
+  .stat{background:var(--key); border-radius:5px; padding:9px 11px}
+  .stat .k{font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--grey)}
+  .stat .v{font-size:19px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--slate-dark)}
+  #verdict{margin-top:12px; padding:11px 13px; border-radius:5px; border-left:4px solid var(--grey);
+           background:var(--key); font-size:14.5px}
+  .note{margin-top:12px; font-size:13px; color:var(--grey)}
+  kbd{background:var(--key); border:1px solid #d6dce8; border-bottom-width:2px;
+      border-radius:3px; padding:1px 5px; font-size:12px; font-family:inherit}
+</style>
+</head>
+<body>
+
+<h1>Gradient Descent Explorer</h1>
+<div class="sub">Week 3 &middot; The Evolution of Machine Learning and AI &middot; booklet chapters 11 to 13</div>
+
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" id="tab1d" aria-selected="true">One parameter</button>
+  <button class="tab" role="tab" id="tab2d" aria-selected="false">Two parameters</button>
+</div>
+
+<div class="controls">
+  <div class="ctl" id="surfaceCtl">
+    <label for="surface">Loss surface</label>
+    <select id="surface"></select>
+  </div>
+  <div class="ctl">
+    <label for="lr">Learning rate &eta; &mdash; <span class="val" id="lrVal">0.100</span></label>
+    <input type="range" id="lr" min="-3" max="0.48" step="0.005" value="-1">
+  </div>
+  <div class="ctl">
+    <label for="mom">Momentum &beta; &mdash; <span class="val" id="momVal">0.00</span></label>
+    <input type="range" id="mom" min="0" max="0.98" step="0.01" value="0">
+  </div>
+  <div class="ctl">
+    <label for="speed">Steps per second &mdash; <span class="val" id="speedVal">8</span></label>
+    <input type="range" id="speed" min="1" max="60" step="1" value="8">
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>&nbsp;</label>
+    <div class="btns">
+      <button id="play">Play</button>
+      <button id="step" class="ghost">Step</button>
+      <button id="reset" class="ghost">Reset</button>
+    </div>
+  </div>
+</div>
+
+<div class="panes">
+  <div class="card">
+    <h2 id="mainTitle">The walk downhill</h2>
+    <canvas id="main" height="420"></canvas>
+  </div>
+  <div class="card">
+    <h2>Loss against step</h2>
+    <canvas id="chart" height="420"></canvas>
+  </div>
+</div>
+
+<div class="readout">
+  <div class="stat"><div class="k">Step</div><div class="v" id="sStep">0</div></div>
+  <div class="stat"><div class="k">Position</div><div class="v" id="sPos">4.000</div></div>
+  <div class="stat"><div class="k">Gradient</div><div class="v" id="sGrad">4.000</div></div>
+  <div class="stat"><div class="k">Loss</div><div class="v" id="sLoss">8.000</div></div>
+</div>
+
+<div id="verdict">Press <kbd>Play</kbd>, or drag the ball to a new starting point.</div>
+
+<div class="note">
+  Drag the ball to move the starting point. On the quadratic bowl the update is
+  <em>x &larr; (1 &minus; &eta;)x</em>, so descent converges only for 0 &lt; &eta; &lt; 2.
+  Find that boundary with the slider, then check it against the algebra.
+</div>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ *
+ * Surfaces. Each supplies the loss, its derivative, and a sensible
+ * viewing window. The 2-D entry supplies a gradient with two parts.
+ * ------------------------------------------------------------------ */
+const SURFACES_1D = {
+  bowl: {
+    label: "Quadratic bowl (the textbook case)",
+    f: x => 0.5 * x * x,
+    df: x => x,
+    xmin: -5.2, xmax: 5.2, ymax: 14, start: 4,
+    note: "One minimum, no surprises. This is the surface the algebra in Chapter 12 describes exactly."
+  },
+  doubleWell: {
+    label: "Two valleys (local minima are real)",
+    f: x => 0.06*x*x*x*x - 0.4*x*x*x + 0.2*x*x + 2*x + 8,
+    df: x => 0.24*x*x*x - 1.2*x*x + 0.4*x + 2,
+    xmin: -3.6, xmax: 7.6, ymax: 26, start: 5.5,
+    note: "Start at 5.5 and you land in the shallow valley. Start at 1.0 and you find the good one. Same algorithm, same learning rate."
+  },
+  ripples: {
+    label: "Bumpy bowl (noise and plateaus)",
+    f: x => 0.35*x*x + 1.6*Math.sin(2.4*x) + 3,
+    df: x => 0.7*x + 3.84*Math.cos(2.4*x),
+    xmin: -6.2, xmax: 6.2, ymax: 18, start: 5.2,
+    note: "Small dents everywhere. Momentum rolls through them; plain descent gets caught."
+  },
+  cliff: {
+    label: "Steep wall (exploding gradients)",
+    f: x => 0.25*x*x + 6/(1 + Math.exp(2.2*(x + 1.6))),
+    df: x => 0.5*x - 13.2*Math.exp(2.2*(x+1.6))/Math.pow(1+Math.exp(2.2*(x+1.6)),2),
+    xmin: -6, xmax: 6, ymax: 16, start: 4.4,
+    note: "A near-vertical face. A learning rate that is safe on the flat part throws you across the map on the wall."
+  }
+};
+
+const ROSEN = {
+  f: (x,y) => Math.pow(1-x,2) + 20*Math.pow(y - x*x, 2),
+  gx: (x,y) => -2*(1-x) - 80*x*(y - x*x),
+  gy: (x,y) => 40*(y - x*x),
+  xmin:-1.8, xmax:1.8, ymin:-0.8, ymax:2.3, start:[-1.25, 1.45], min:[1,1]
+};
+
+/* ------------------------------------------------------------------ */
+const C = {
+  slate:"#47546B", grey:"#8A93A5", amber:"#A96E08", blue:"#4E7291",
+  red:"#9E3B2C", green:"#2E7D4F", key:"#EDF0F5", ink:"#22293A"
+};
+
+const el = id => document.getElementById(id);
+const main = el("main"), chart = el("chart");
+const mctx = main.getContext("2d"), cctx = chart.getContext("2d");
+
+let mode = "1d";
+let surfKey = "bowl";
+let lr = 0.1, momentum = 0, sps = 8;
+let playing = false, lastTick = 0;
+
+// 1-D state
+let x = 4, v = 0, steps = 0, history = [], diverged = false;
+// 2-D state
+let p2 = [ROSEN.start[0], ROSEN.start[1]], v2 = [0,0], path2 = [];
+
+/* ---------------- canvas sizing, DPI aware ------------------------ */
+function fit(cv){
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = parseInt(cv.getAttribute("height"), 10);
+  cv.width = Math.max(1, Math.round(w * dpr));
+  cv.height = Math.round(h * dpr);
+  cv.style.height = h + "px";
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { w: w, h: h };
+}
+
+/* ---------------- the algorithm ----------------------------------- */
+function reset(){
+  const s = SURFACES_1D[surfKey];
+  x = s.start; v = 0; steps = 0; diverged = false;
+  history = [ s.f(x) ];
+  p2 = [ROSEN.start[0], ROSEN.start[1]]; v2 = [0,0];
+  path2 = [[p2[0], p2[1]]];
+  draw();
+}
+
+function stepOnce(){
+  if (mode === "1d"){
+    if (diverged) return;
+    const s = SURFACES_1D[surfKey];
+    const g = s.df(x);
+    v = momentum * v - lr * g;
+    x = x + v;
+    steps++;
+    if (!isFinite(x) || Math.abs(x) > 1e7){ diverged = true; return; }
+    history.push(s.f(x));
+    if (history.length > 4000) history.shift();
+  } else {
+    const gx = ROSEN.gx(p2[0], p2[1]), gy = ROSEN.gy(p2[0], p2[1]);
+    v2[0] = momentum * v2[0] - lr * 0.02 * gx;
+    v2[1] = momentum * v2[1] - lr * 0.02 * gy;
+    p2[0] += v2[0]; p2[1] += v2[1];
+    steps++;
+    if (!isFinite(p2[0]) || Math.abs(p2[0]) > 1e4){ diverged = true; return; }
+    path2.push([p2[0], p2[1]]);
+    history.push(ROSEN.f(p2[0], p2[1]));
+    if (path2.length > 4000){ path2.shift(); history.shift(); }
+  }
+}
+
+/* ---------------- verdict, mirroring the lab ---------------------- */
+function verdict(){
+  const box = el("verdict");
+  let text, colour, bg;
+  if (diverged){
+    text = "<b>Diverging.</b> Every step overshoots further than the last, so the loss runs away to infinity and then to <code>nan</code>. Nothing in real training code warns you about this.";
+    colour = C.red; bg = "#F9E9E4";
+  } else if (steps < 3){
+    text = "Press <b>Play</b>, or drag the ball to a new starting point.";
+    colour = C.grey; bg = C.key;
+  } else {
+    const last = history[history.length-1];
+    const first = history[0];
+    const recent = history.slice(-12);
+    const rising = last > first * 1.05;
+    let oscillating = false;
+    if (mode === "1d" && history.length > 6){
+      // a sign change in the position implies crossing the minimum
+      oscillating = Math.abs(v) > 1e-9 && lr > 1;
+    }
+    const improving = recent[0] - recent[recent.length-1];
+    if (rising){
+      text = "<b>Diverging.</b> The loss is higher than where you started. Reduce the learning rate.";
+      colour = C.red; bg = "#F9E9E4";
+    } else if (oscillating){
+      text = "<b>Oscillating.</b> Each step leaps across the minimum and lands on the far side. It is technically descending, and it will take all week. Reduce the learning rate.";
+      colour = C.amber; bg = "#FBF1DC";
+    } else if (last < 1e-3 || (mode==="2d" && last < 0.02)){
+      text = "<b>Converged.</b> The gradient is essentially zero, so the steps have stopped moving anything.";
+      colour = C.green; bg = "#E3F2EA";
+    } else if (improving < 1e-4){
+      text = "<b>Stalled.</b> Barely moving. Either the surface is flat here (a plateau or a saddle) or the learning rate is far too small.";
+      colour = C.blue; bg = "#E7EFF5";
+    } else {
+      text = "<b>Descending.</b> Correct direction. Watch whether it arrives before you run out of patience: that is what a compute budget feels like.";
+      colour = C.slate; bg = C.key;
+    }
+  }
+  box.style.borderLeftColor = colour;
+  box.style.background = bg;
+  box.innerHTML = text;
+}
+
+/* ---------------- drawing: 1-D ------------------------------------ */
+function draw1d(){
+  const { w, h } = fit(main);
+  const s = SURFACES_1D[surfKey];
+  const pad = { l: 42, r: 16, t: 18, b: 34 };
+  const X = u => pad.l + (u - s.xmin)/(s.xmax - s.xmin) * (w - pad.l - pad.r);
+  const Y = u => h - pad.b - Math.min(u, s.ymax)/s.ymax * (h - pad.t - pad.b);
+
+  mctx.clearRect(0,0,w,h);
+
+  // axes
+  mctx.strokeStyle = "#D9DFEA"; mctx.lineWidth = 1;
+  mctx.beginPath(); mctx.moveTo(pad.l, h-pad.b); mctx.lineTo(w-pad.r, h-pad.b); mctx.stroke();
+  mctx.beginPath(); mctx.moveTo(pad.l, pad.t); mctx.lineTo(pad.l, h-pad.b); mctx.stroke();
+  mctx.fillStyle = C.grey; mctx.font = "11px sans-serif";
+  mctx.fillText("parameter", w/2 - 26, h - 10);
+  mctx.save(); mctx.translate(13, h/2 + 14); mctx.rotate(-Math.PI/2);
+  mctx.fillText("loss", 0, 0); mctx.restore();
+
+  // the curve
+  mctx.strokeStyle = C.grey; mctx.lineWidth = 2; mctx.beginPath();
+  for (let i = 0; i <= 400; i++){
+    const u = s.xmin + (s.xmax - s.xmin) * i/400;
+    const yy = Y(s.f(u));
+    if (i === 0) mctx.moveTo(X(u), yy); else mctx.lineTo(X(u), yy);
+  }
+  mctx.stroke();
+
+  // the path already walked
+  if (mode === "1d"){
+    const trail = [];
+    let tx = s.start, tv = 0;
+    for (let i = 0; i < steps && i < 600; i++){
+      trail.push(tx);
+      const g = s.df(tx); tv = momentum*tv - lr*g; tx = tx + tv;
+      if (!isFinite(tx) || Math.abs(tx) > 1e7) break;
+    }
+    trail.push(x);
+    mctx.lineWidth = 1.6;
+    for (let i = 0; i < trail.length - 1; i++){
+      const a = trail[i], b = trail[i+1];
+      if (!isFinite(a) || !isFinite(b)) break;
+      const t = i / Math.max(1, trail.length - 1);
+      mctx.strokeStyle = diverged ? C.red : C.slate;
+      mctx.globalAlpha = 0.25 + 0.65 * t;
+      mctx.beginPath();
+      mctx.moveTo(X(clamp(a, s.xmin, s.xmax)), Y(s.f(clamp(a, s.xmin, s.xmax))));
+      mctx.lineTo(X(clamp(b, s.xmin, s.xmax)), Y(s.f(clamp(b, s.xmin, s.xmax))));
+      mctx.stroke();
+      mctx.fillStyle = mctx.strokeStyle;
+      mctx.beginPath();
+      mctx.arc(X(clamp(a, s.xmin, s.xmax)), Y(s.f(clamp(a, s.xmin, s.xmax))), 2.4, 0, 7);
+      mctx.fill();
+    }
+    mctx.globalAlpha = 1;
+  }
+
+  // tangent line: the slope the walker can feel
+  const xc = clamp(x, s.xmin, s.xmax);
+  const g = s.df(xc);
+  const dx = (s.xmax - s.xmin) * 0.10;
+  mctx.strokeStyle = C.amber; mctx.lineWidth = 2.4; mctx.setLineDash([6,4]);
+  mctx.beginPath();
+  mctx.moveTo(X(xc - dx), Y(s.f(xc) - g*dx));
+  mctx.lineTo(X(xc + dx), Y(s.f(xc) + g*dx));
+  mctx.stroke(); mctx.setLineDash([]);
+
+  // the ball
+  mctx.fillStyle = diverged ? C.red : C.slate;
+  mctx.beginPath(); mctx.arc(X(xc), Y(s.f(xc)), 8, 0, 7); mctx.fill();
+  mctx.strokeStyle = "#fff"; mctx.lineWidth = 2.5; mctx.stroke();
+
+  // arrow showing the next step
+  if (!diverged){
+    const nx = clamp(xc + (momentum*v - lr*g), s.xmin, s.xmax);
+    mctx.strokeStyle = C.green; mctx.lineWidth = 2.6;
+    mctx.beginPath();
+    mctx.moveTo(X(xc), Y(s.f(xc)) - 16);
+    mctx.lineTo(X(nx), Y(s.f(xc)) - 16);
+    mctx.stroke();
+    const dir = nx >= xc ? 1 : -1;
+    mctx.fillStyle = C.green;
+    mctx.beginPath();
+    mctx.moveTo(X(nx), Y(s.f(xc)) - 16);
+    mctx.lineTo(X(nx) - dir*7, Y(s.f(xc)) - 20);
+    mctx.lineTo(X(nx) - dir*7, Y(s.f(xc)) - 12);
+    mctx.closePath(); mctx.fill();
+    mctx.fillStyle = C.green; mctx.font = "bold 11px sans-serif";
+    mctx.fillText("next step", X((xc+nx)/2) - 24, Y(s.f(xc)) - 24);
+  }
+
+  mctx.fillStyle = C.amber; mctx.font = "bold 11px sans-serif";
+  mctx.fillText("the slope you can feel", X(xc) + 12, Y(s.f(xc)) + 26);
+}
+
+/* ---------------- drawing: 2-D contours --------------------------- */
+function draw2d(){
+  const { w, h } = fit(main);
+  const pad = { l: 40, r: 14, t: 16, b: 32 };
+  const X = u => pad.l + (u - ROSEN.xmin)/(ROSEN.xmax - ROSEN.xmin) * (w - pad.l - pad.r);
+  const Y = u => h - pad.b - (u - ROSEN.ymin)/(ROSEN.ymax - ROSEN.ymin) * (h - pad.t - pad.b);
+
+  mctx.clearRect(0,0,w,h);
+
+  // filled heat map, coarse but cheap
+  const N = 90;
+  const cw = (w - pad.l - pad.r)/N, ch = (h - pad.t - pad.b)/N;
+  for (let i = 0; i < N; i++){
+    for (let j = 0; j < N; j++){
+      const ux = ROSEN.xmin + (ROSEN.xmax-ROSEN.xmin)*i/N;
+      const uy = ROSEN.ymin + (ROSEN.ymax-ROSEN.ymin)*j/N;
+      const z = Math.log10(1 + ROSEN.f(ux, uy));
+      const t = Math.min(1, z/3.1);
+      const shade = Math.round(255 - 118*(1-t));
+      mctx.fillStyle = "rgb(" + shade + "," + (shade+2) + "," + Math.min(255, shade+10) + ")";
+      mctx.fillRect(pad.l + i*cw, Y(uy) - ch, cw+1, ch+1);
+    }
+  }
+
+  // contour rings
+  mctx.strokeStyle = "rgba(138,147,165,.55)"; mctx.lineWidth = 0.8;
+  for (const level of [0.3,1,3,10,30,100,300]){
+    mctx.beginPath();
+    let started = false;
+    for (let i = 0; i <= 260; i++){
+      const ux = ROSEN.xmin + (ROSEN.xmax-ROSEN.xmin)*i/260;
+      const inner = level - Math.pow(1-ux,2);
+      if (inner < 0){ started = false; continue; }
+      const uy = ux*ux + Math.sqrt(inner/20);
+      if (uy < ROSEN.ymin || uy > ROSEN.ymax){ started = false; continue; }
+      if (!started){ mctx.moveTo(X(ux), Y(uy)); started = true; }
+      else mctx.lineTo(X(ux), Y(uy));
+    }
+    mctx.stroke();
+    mctx.beginPath(); started = false;
+    for (let i = 0; i <= 260; i++){
+      const ux = ROSEN.xmin + (ROSEN.xmax-ROSEN.xmin)*i/260;
+      const inner = level - Math.pow(1-ux,2);
+      if (inner < 0){ started = false; continue; }
+      const uy = ux*ux - Math.sqrt(inner/20);
+      if (uy < ROSEN.ymin || uy > ROSEN.ymax){ started = false; continue; }
+      if (!started){ mctx.moveTo(X(ux), Y(uy)); started = true; }
+      else mctx.lineTo(X(ux), Y(uy));
+    }
+    mctx.stroke();
+  }
+
+  // the path
+  mctx.strokeStyle = diverged ? C.red : C.slate; mctx.lineWidth = 2;
+  mctx.beginPath();
+  for (let i = 0; i < path2.length; i++){
+    const q = path2[i];
+    if (!isFinite(q[0]) || !isFinite(q[1])) break;
+    if (i === 0) mctx.moveTo(X(q[0]), Y(q[1])); else mctx.lineTo(X(q[0]), Y(q[1]));
+  }
+  mctx.stroke();
+
+  // the minimum
+  mctx.fillStyle = C.amber;
+  star(mctx, X(ROSEN.min[0]), Y(ROSEN.min[1]), 9);
+
+  // current point
+  mctx.fillStyle = diverged ? C.red : C.slate;
+  mctx.beginPath(); mctx.arc(X(p2[0]), Y(p2[1]), 7, 0, 7); mctx.fill();
+  mctx.strokeStyle="#fff"; mctx.lineWidth=2.4; mctx.stroke();
+
+  mctx.fillStyle = C.grey; mctx.font = "11px sans-serif";
+  mctx.fillText("parameter 1", w/2 - 30, h - 9);
+  mctx.fillText("the star is the true minimum", pad.l + 6, pad.t + 12);
+}
+
+function star(ctx, cx, cy, r){
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++){
+    const rad = (i % 2 === 0) ? r : r*0.44;
+    const a = -Math.PI/2 + i*Math.PI/5;
+    const px = cx + rad*Math.cos(a), py = cy + rad*Math.sin(a);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath(); ctx.fill();
+}
+
+/* ---------------- drawing: loss chart ----------------------------- */
+function drawChart(){
+  const { w, h } = fit(chart);
+  const pad = { l: 46, r: 14, t: 18, b: 34 };
+  cctx.clearRect(0,0,w,h);
+
+  cctx.strokeStyle = "#D9DFEA"; cctx.lineWidth = 1;
+  cctx.beginPath(); cctx.moveTo(pad.l, h-pad.b); cctx.lineTo(w-pad.r, h-pad.b); cctx.stroke();
+  cctx.beginPath(); cctx.moveTo(pad.l, pad.t); cctx.lineTo(pad.l, h-pad.b); cctx.stroke();
+  cctx.fillStyle = C.grey; cctx.font = "11px sans-serif";
+  cctx.fillText("step", w/2 - 12, h - 10);
+  cctx.save(); cctx.translate(14, h/2 + 26); cctx.rotate(-Math.PI/2);
+  cctx.fillText("loss (log scale)", 0, 0); cctx.restore();
+
+  if (history.length < 2) return;
+
+  const safe = history.filter(isFinite).map(z => Math.max(z, 1e-12));
+  const lo = Math.log10(Math.min.apply(null, safe));
+  const hi = Math.log10(Math.max.apply(null, safe));
+  const span = Math.max(0.6, hi - lo);
+  const X = i => pad.l + i/Math.max(1, history.length-1) * (w - pad.l - pad.r);
+  const Y = z => h - pad.b - (Math.log10(Math.max(z,1e-12)) - lo)/span * (h - pad.t - pad.b);
+
+  // gridlines at each decade
+  cctx.strokeStyle = "#EEF1F7";
+  for (let d = Math.ceil(lo); d <= Math.floor(hi); d++){
+    const yy = Y(Math.pow(10,d));
+    cctx.beginPath(); cctx.moveTo(pad.l, yy); cctx.lineTo(w-pad.r, yy); cctx.stroke();
+    cctx.fillStyle = C.grey; cctx.font = "10px sans-serif";
+    cctx.fillText("1e"+d, 6, yy+3);
+  }
+
+  cctx.strokeStyle = diverged ? C.red : C.slate; cctx.lineWidth = 2;
+  cctx.beginPath();
+  for (let i = 0; i < history.length; i++){
+    const z = history[i];
+    if (!isFinite(z)) break;
+    if (i === 0) cctx.moveTo(X(i), Y(z)); else cctx.lineTo(X(i), Y(z));
+  }
+  cctx.stroke();
+}
+
+/* ---------------- glue -------------------------------------------- */
+function clamp(u,a,b){ return Math.max(a, Math.min(b, u)); }
+
+function draw(){
+  if (mode === "1d") draw1d(); else draw2d();
+  drawChart();
+  const s = SURFACES_1D[surfKey];
+  el("sStep").textContent = steps;
+  if (mode === "1d"){
+    el("sPos").textContent  = isFinite(x) ? x.toFixed(3) : "inf";
+    el("sGrad").textContent = isFinite(x) ? s.df(x).toFixed(3) : "inf";
+    el("sLoss").textContent = isFinite(x) ? fmt(s.f(x)) : "inf";
+    el("mainTitle").textContent = s.label;
+  } else {
+    el("sPos").textContent  = "(" + p2[0].toFixed(2) + ", " + p2[1].toFixed(2) + ")";
+    el("sGrad").textContent = ROSEN.gx(p2[0],p2[1]).toFixed(1);
+    el("sLoss").textContent = fmt(ROSEN.f(p2[0], p2[1]));
+    el("mainTitle").textContent = "Rosenbrock valley: easy to enter, hard to follow";
+  }
+  verdict();
+}
+
+function fmt(z){
+  if (!isFinite(z)) return "inf";
+  if (z !== 0 && (Math.abs(z) < 1e-3 || Math.abs(z) >= 1e5)) return z.toExponential(1);
+  return z.toFixed(4);
+}
+
+function loop(ts){
+  if (playing){
+    if (ts - lastTick > 1000/sps){ lastTick = ts; stepOnce(); draw(); }
+    requestAnimationFrame(loop);
+  }
+}
+
+/* ---------------- controls ---------------------------------------- */
+(function init(){
+  const sel = el("surface");
+  for (const k in SURFACES_1D){
+    const o = document.createElement("option");
+    o.value = k; o.textContent = SURFACES_1D[k].label;
+    sel.appendChild(o);
+  }
+  sel.value = "bowl";
+
+  sel.addEventListener("change", () => { surfKey = sel.value; reset(); });
+
+  el("lr").addEventListener("input", e => {
+    lr = Math.pow(10, parseFloat(e.target.value));
+    el("lrVal").textContent = lr.toFixed(lr < 0.01 ? 4 : 3);
+    reset();
+  });
+  el("mom").addEventListener("input", e => {
+    momentum = parseFloat(e.target.value);
+    el("momVal").textContent = momentum.toFixed(2);
+    reset();
+  });
+  el("speed").addEventListener("input", e => {
+    sps = parseInt(e.target.value, 10);
+    el("speedVal").textContent = sps;
+  });
+
+  el("play").addEventListener("click", () => {
+    playing = !playing;
+    el("play").textContent = playing ? "Pause" : "Play";
+    if (playing){ lastTick = 0; requestAnimationFrame(loop); }
+  });
+  el("step").addEventListener("click", () => { stepOnce(); draw(); });
+  el("reset").addEventListener("click", () => {
+    playing = false; el("play").textContent = "Play"; reset();
+  });
+
+  function setMode(m){
+    mode = m;
+    el("tab1d").setAttribute("aria-selected", String(m === "1d"));
+    el("tab2d").setAttribute("aria-selected", String(m === "2d"));
+    el("surfaceCtl").style.visibility = (m === "1d") ? "visible" : "hidden";
+    playing = false; el("play").textContent = "Play";
+    reset();
+  }
+  el("tab1d").addEventListener("click", () => setMode("1d"));
+  el("tab2d").addEventListener("click", () => setMode("2d"));
+
+  // drag the ball to choose a starting point
+  main.addEventListener("pointerdown", ev => {
+    if (mode !== "1d") return;
+    const s = SURFACES_1D[surfKey];
+    const r = main.getBoundingClientRect();
+    const pad = { l: 42, r: 16 };
+    const u = s.xmin + (ev.clientX - r.left - pad.l)/(r.width - pad.l - pad.r) * (s.xmax - s.xmin);
+    s.start = clamp(u, s.xmin, s.xmax);
+    playing = false; el("play").textContent = "Play";
+    reset();
+  });
+
+  window.addEventListener("resize", draw);
+
+  el("lrVal").textContent = "0.100";
+  reset();
+})();
+</script>
+</body>
+</html>

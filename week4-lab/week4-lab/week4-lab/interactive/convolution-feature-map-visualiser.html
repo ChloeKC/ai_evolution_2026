@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<!--
+  Convolution / Feature-Map Visualiser
+  The Evolution of Machine Learning and AI, Week 4
+  South East Technological University
+
+  Watch a kernel walk across an image, one position at a time, and see the
+  weighted sum land in the feature map. Then stack layers and watch the
+  receptive field grow. Single file, no build step, no network. Embed with:
+  <iframe src="convolution-feature-map-visualiser.html" width="100%" height="1000"
+          style="border:0"></iframe>
+
+  Booklet cross-references: Chapters 6, 7, 8 and 9.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Convolution / Feature-Map Visualiser</title>
+<style>
+  :root{
+    --slate:#47546B; --slate-dark:#333F53; --ink:#22293A; --grey:#8A93A5;
+    --amber:#A96E08; --blue:#4E7291; --red:#9E3B2C; --green:#2E7D4F;
+    --key:#EDF0F5; --panel:#F7F9FC; --line:#E3E8F0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; padding:18px; color:var(--ink); background:#fff;
+       font:15px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}
+  h1{font-size:20px; margin:0 0 2px; color:var(--slate-dark)}
+  .sub{color:var(--grey); font-size:13px; margin-bottom:14px}
+  .tabs{display:flex; gap:4px; margin-bottom:12px; border-bottom:2px solid var(--line)}
+  .tab{padding:8px 15px; cursor:pointer; font-size:14px; font-weight:600;
+       color:var(--grey); border:0; background:none; border-bottom:3px solid transparent}
+  .tab.on{color:var(--slate-dark); border-bottom-color:var(--amber)}
+  .controls{display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;
+    background:var(--panel); border:1px solid var(--line); border-radius:6px;
+    padding:12px 14px; margin-bottom:12px}
+  .ctl{display:flex; flex-direction:column; gap:3px; min-width:145px}
+  .ctl label{font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--grey)}
+  .ctl .val{font-weight:700; color:var(--slate-dark); font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%; accent-color:var(--slate)}
+  select{padding:5px; border:1px solid var(--grey); border-radius:4px; background:#fff; font-size:13.5px}
+  .btns{display:flex; gap:6px}
+  button{padding:7px 13px; border:0; border-radius:5px; cursor:pointer;
+         font-size:13.5px; font-weight:600; color:#fff; background:var(--slate)}
+  button.ghost{background:#fff; color:var(--slate); border:1px solid var(--grey)}
+  button:disabled{opacity:.45; cursor:default}
+  .panes{display:grid; grid-template-columns:1.25fr 0.8fr 1.25fr; gap:12px; align-items:start}
+  @media(max-width:1000px){.panes{grid-template-columns:1fr 1fr}}
+  @media(max-width:660px){.panes{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line); border-radius:6px; padding:9px; background:#fff}
+  .card h2{font-size:11.5px; letter-spacing:.08em; text-transform:uppercase;
+           color:var(--grey); margin:2px 0 3px 3px}
+  .card p.cap{font-size:12px; color:var(--grey); margin:2px 3px 7px}
+  canvas{width:100%; display:block; border-radius:4px}
+  .readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+           gap:10px; margin-top:12px}
+  .stat{background:var(--key); border-radius:5px; padding:9px 11px}
+  .stat .k{font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--grey)}
+  .stat .v{font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--slate-dark)}
+  #msg,#msg2{margin-top:12px; padding:11px 13px; border-radius:5px;
+       border-left:4px solid var(--slate); background:var(--key); font-size:14.5px}
+  .note{margin-top:12px; font-size:13px; color:var(--grey)}
+  .sum{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px;
+       background:var(--panel); border:1px solid var(--line); border-radius:5px;
+       padding:9px 10px; margin-top:8px; color:var(--slate-dark); overflow-x:auto;
+       white-space:nowrap}
+  table.kt{border-collapse:collapse; width:100%; font-size:13px; margin-top:6px}
+  table.kt td,table.kt th{border:1px solid var(--line); padding:5px 7px; text-align:right}
+  table.kt th{background:var(--key); color:var(--slate-dark); font-size:11.5px;
+              text-transform:uppercase; letter-spacing:.06em; text-align:left}
+  table.kt td:first-child{text-align:left}
+  .kgrid{display:grid; grid-template-columns:repeat(3,1fr); gap:4px; max-width:190px; margin:6px 0}
+  .kgrid input{width:100%; padding:5px 2px; text-align:center; font-size:13px;
+    border:1px solid var(--grey); border-radius:4px; font-variant-numeric:tabular-nums}
+  .hide{display:none}
+  .lbl{font-size:12px; color:var(--grey); margin-top:8px}
+  .pill{display:inline-block; padding:2px 8px; border-radius:11px; font-size:11.5px;
+        font-weight:700; color:#fff; background:var(--slate)}
+</style>
+</head>
+<body>
+
+<h1>Convolution / Feature-Map Visualiser</h1>
+<div class="sub">Week 4 &middot; The Evolution of Machine Learning and AI &middot; booklet chapters 6 to 9</div>
+
+<div class="tabs">
+  <button class="tab on" data-tab="walk">1. Watch the kernel walk</button>
+  <button class="tab" data-tab="bank">2. A bank of filters</button>
+  <button class="tab" data-tab="depth">3. Depth and the receptive field</button>
+  <button class="tab" data-tab="shuffle">4. Break the assumption</button>
+</div>
+
+<!-- ==================== TAB 1: the walk ==================== -->
+<div id="tab-walk">
+<div class="controls">
+  <div class="ctl">
+    <label for="img">Image</label>
+    <select id="img">
+      <option value="edges">Edges and a corner</option>
+      <option value="digit">A hand-drawn 7</option>
+      <option value="circle">A circle</option>
+      <option value="texture">Stripes</option>
+    </select>
+  </div>
+  <div class="ctl">
+    <label for="kern">Kernel</label>
+    <select id="kern">
+      <option value="vedge">Vertical edge detector</option>
+      <option value="hedge">Horizontal edge detector</option>
+      <option value="diag">Diagonal detector</option>
+      <option value="blur">Blur (averaging)</option>
+      <option value="sharp">Sharpen</option>
+      <option value="ident">Identity (copy)</option>
+      <option value="custom">Custom, type your own</option>
+    </select>
+    <div class="kgrid" id="kgrid"></div>
+  </div>
+  <div class="ctl">
+    <label for="stride">Stride &ndash; <span class="val" id="strideVal">1</span></label>
+    <input type="range" id="stride" min="1" max="4" step="1" value="1">
+  </div>
+  <div class="ctl">
+    <label for="pad">Padding &ndash; <span class="val" id="padVal">1</span></label>
+    <input type="range" id="pad" min="0" max="2" step="1" value="1">
+  </div>
+  <div class="ctl">
+    <label for="speed">Speed &ndash; <span class="val" id="speedVal">fast</span></label>
+    <input type="range" id="speed" min="1" max="5" step="1" value="4">
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>&nbsp;</label>
+    <div class="btns">
+      <button id="play">Walk</button>
+      <button id="stepBtn" class="ghost">Step</button>
+      <button id="finish" class="ghost">Finish</button>
+      <button id="reset" class="ghost">Reset</button>
+    </div>
+  </div>
+</div>
+
+<div class="panes">
+  <div class="card">
+    <h2>The input</h2>
+    <p class="cap">The amber square is the patch the kernel is looking at right now.</p>
+    <canvas id="cIn" height="320"></canvas>
+  </div>
+  <div class="card">
+    <h2>The kernel, on this patch</h2>
+    <p class="cap">Nine multiplications, then one addition. That is the entire operation.</p>
+    <canvas id="cKern" height="200"></canvas>
+    <div class="sum" id="sumText">Press Walk.</div>
+  </div>
+  <div class="card">
+    <h2>The feature map</h2>
+    <p class="cap">Blue is a positive response, red negative, white none. It fills in as the kernel walks.</p>
+    <canvas id="cOut" height="320"></canvas>
+  </div>
+</div>
+
+<div class="readout">
+  <div class="stat"><div class="k">Input size</div><div class="v" id="sIn">32 x 32</div></div>
+  <div class="stat"><div class="k">Output size</div><div class="v" id="sOut">32 x 32</div></div>
+  <div class="stat"><div class="k">Position</div><div class="v" id="sPos">0 / 1024</div></div>
+  <div class="stat"><div class="k">This response</div><div class="v" id="sResp">0.00</div></div>
+  <div class="stat"><div class="k">Kernel weights</div><div class="v" id="sWts">9</div></div>
+</div>
+
+<div id="msg">The kernel is nine numbers. It does not change as it walks. That single fact is
+the <b>stationarity assumption</b>: a feature worth detecting in one corner is worth detecting everywhere,
+so the same detector is reused at every position.</div>
+
+<div class="note">
+  <b>Worth doing.</b> Set the kernel to the vertical edge detector and note where the feature map lights
+  up. Now switch to horizontal and watch a completely different set of positions respond, from the same
+  image and the same nine-number machinery. Then set padding to 0 and watch the output shrink, and set
+  stride to 2 and watch it halve. The size arithmetic is
+  <span class="pill">out = (n + 2p &minus; k) / s + 1</span> and the readout above checks it for you.
+</div>
+</div>
+
+<!-- ==================== TAB 2: filter bank ==================== -->
+<div id="tab-bank" class="hide">
+<div class="controls">
+  <div class="ctl">
+    <label for="img2">Image</label>
+    <select id="img2">
+      <option value="edges">Edges and a corner</option>
+      <option value="digit">A hand-drawn 7</option>
+      <option value="circle">A circle</option>
+      <option value="texture">Stripes</option>
+    </select>
+  </div>
+  <div class="ctl">
+    <label for="relu">After the convolution</label>
+    <select id="relu">
+      <option value="none">nothing (raw response)</option>
+      <option value="relu" selected>ReLU (keep positives)</option>
+      <option value="abs">absolute value</option>
+    </select>
+  </div>
+  <div class="ctl">
+    <label for="pool">Pooling</label>
+    <select id="pool">
+      <option value="none">none</option>
+      <option value="max2">max pool 2 x 2</option>
+      <option value="avg2">average pool 2 x 2</option>
+    </select>
+  </div>
+</div>
+<div class="card">
+  <h2>One image, six filters, six feature maps</h2>
+  <p class="cap">A convolution layer is not one filter. It is a bank of them, each asking a different
+  question of every position, and each producing its own channel.</p>
+  <canvas id="cBank" height="260"></canvas>
+</div>
+<div id="msg2">Six filters of nine weights each is <b>54 weights plus 6 biases</b>. A dense layer
+connecting 32 x 32 pixels to 128 units needs <b>131,200</b>. Both look at the whole image. Only one of them
+assumed anything about it.</div>
+<div class="note">
+  <b>Worth doing.</b> Turn ReLU off and on. With it off, an edge and its opposite produce mirror-image
+  responses that partly cancel later; with it on, each filter reports only the polarity it was built for,
+  which is why the next layer can treat "this edge, this way round" as a feature. Then switch on max
+  pooling and notice the maps get smaller and blockier: that is position information being deliberately
+  discarded in exchange for a little tolerance to movement.
+</div>
+</div>
+
+<!-- ==================== TAB 3: depth ==================== -->
+<div id="tab-depth" class="hide">
+<div class="controls">
+  <div class="ctl">
+    <label for="layers">Layers &ndash; <span class="val" id="layersVal">4</span></label>
+    <input type="range" id="layers" min="1" max="8" step="1" value="4">
+  </div>
+  <div class="ctl">
+    <label for="ksize">Kernel size &ndash; <span class="val" id="ksizeVal">3</span></label>
+    <input type="range" id="ksize" min="3" max="7" step="2" value="3">
+  </div>
+  <div class="ctl">
+    <label for="poolEvery">Pool every &ndash; <span class="val" id="poolEveryVal">2</span> layers</label>
+    <input type="range" id="poolEvery" min="1" max="4" step="1" value="2">
+  </div>
+</div>
+<div class="panes" style="grid-template-columns:1.1fr 1fr">
+  <div class="card">
+    <h2>What one output unit can see</h2>
+    <p class="cap">Each box is the region of the original image that a single unit at that layer depends on.</p>
+    <canvas id="cRF" height="360"></canvas>
+  </div>
+  <div class="card">
+    <h2>The arithmetic</h2>
+    <p class="cap">The recurrence, layer by layer. No global rule is ever written down.</p>
+    <div id="rfTable"></div>
+  </div>
+</div>
+<div id="msg3" class="hide"></div>
+<div class="note">
+  <b>The point.</b> A single 3 x 3 convolution sees nine pixels and nothing else. Stack a few, with the
+  occasional pool, and one unit near the top depends on the whole image. Global understanding was built out
+  of purely local operations, and nobody ever wrote a rule about the picture as a whole. This is
+  <b>compositionality</b>, the third assumption, and it is why the layers of a trained CNN go edges, then
+  textures, then parts, then objects.
+</div>
+</div>
+
+<!-- ==================== TAB 4: shuffle ==================== -->
+<div id="tab-shuffle" class="hide">
+<div class="controls">
+  <div class="ctl">
+    <label for="img4">Image</label>
+    <select id="img4">
+      <option value="digit">A hand-drawn 7</option>
+      <option value="edges">Edges and a corner</option>
+      <option value="circle">A circle</option>
+    </select>
+  </div>
+  <div class="ctl">
+    <label for="damage">What to do to it</label>
+    <select id="damage">
+      <option value="none">nothing</option>
+      <option value="shift">shift it by 5 pixels</option>
+      <option value="shuffle" selected>shuffle the pixels (one fixed permutation)</option>
+    </select>
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>&nbsp;</label>
+    <div class="btns"><button id="reshuffle" class="ghost">New permutation</button></div>
+  </div>
+</div>
+<div class="panes" style="grid-template-columns:1fr 1fr 1fr">
+  <div class="card">
+    <h2>The image, after the damage</h2>
+    <p class="cap">Every pixel value still present. Nothing deleted.</p>
+    <canvas id="cS1" height="250"></canvas>
+  </div>
+  <div class="card">
+    <h2>Edge detector response</h2>
+    <p class="cap">What a convolution can still find.</p>
+    <canvas id="cS2" height="250"></canvas>
+  </div>
+  <div class="card">
+    <h2>Histogram of pixel values</h2>
+    <p class="cap">What a dense layer effectively has to work with anyway.</p>
+    <canvas id="cS3" height="250"></canvas>
+  </div>
+</div>
+<div class="readout">
+  <div class="stat"><div class="k">Edge energy, original</div><div class="v" id="sE0">0.00</div></div>
+  <div class="stat"><div class="k">Edge energy, now</div><div class="v" id="sE1">0.00</div></div>
+  <div class="stat"><div class="k">Change</div><div class="v" id="sEd">0%</div></div>
+  <div class="stat"><div class="k">Pixel values kept</div><div class="v" id="sKeep">100%</div></div>
+</div>
+<div id="msg4">Choose <b>shift</b> and the edge response moves but survives: a convolution is
+<b>equivariant</b> to translation, so shifting the input shifts the output and changes nothing else.
+Choose <b>shuffle</b> and the edge response collapses, even though every single pixel value is still
+there and the histogram is identical. The convolution never cared about the values. It cared about
+which values were <i>next to</i> which.</div>
+<div class="note">
+  This is the experiment <code>inductive_bias.py</code> runs on a trained network. There, the CNN goes from
+  0.99 accuracy to chance under exactly this permutation, while the dense network does not move at all.
+  The CNN's advantage was never general capability. It was an assumption about neighbours, and this tab is
+  that assumption being removed.
+</div>
+</div>
+
+<script>
+"use strict";
+
+const C = { slate:"#47546B", grey:"#8A93A5", amber:"#A96E08", blue:"#4E7291",
+            red:"#9E3B2C", green:"#2E7D4F", key:"#EDF0F5", line:"#E3E8F0" };
+
+const N = 32;
+
+/* ---------------- images, all drawn in code ------------------------- */
+function makeImage(kind){
+  const a = Array.from({length:N}, () => new Float64Array(N));
+  const noise = (r,c) => (Math.sin(r*12.9898 + c*78.233) * 43758.5453 % 1) * 0.03;
+  if (kind === "edges"){
+    for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+      let v = c >= N/2 ? 1.0 : 0.0;
+      if (r >= N/3 && r < 2*N/3) v += 0.45;
+      if (r >= 2*N/3 && c >= 2*N/3) v = 0.28;
+      a[r][c] = Math.min(1.4, v + noise(r,c));
+    }
+  } else if (kind === "digit"){
+    for (let r=0;r<N;r++) for (let c=0;c<N;c++) a[r][c] = 0.04 + noise(r,c);
+    for (let c=7;c<25;c++){ a[7][c]=1; a[8][c]=1; }                 // top bar
+    for (let i=0;i<17;i++){                                          // diagonal
+      const r = 8+i, c = Math.round(24 - i*0.85);
+      if (r<N && c>0){ a[r][c]=1; a[r][c-1]=1; }
+    }
+    for (let c=11;c<20;c++){ a[16][c]=0.9; }                         // crossbar
+  } else if (kind === "circle"){
+    const cx=15.5, cy=15.5, R=9.5;
+    for (let r=0;r<N;r++) for (let c=0;c<N;c++){
+      const d = Math.hypot(r-cy, c-cx);
+      a[r][c] = Math.max(0, 1 - Math.abs(d-R)/2.0) + 0.04 + noise(r,c);
+    }
+  } else {
+    for (let r=0;r<N;r++) for (let c=0;c<N;c++)
+      a[r][c] = 0.5 + 0.5*Math.sin(c*0.9) * (r<N/2 ? 1 : 0) +
+                (r>=N/2 ? 0.5*Math.sin(r*0.9) : 0) + noise(r,c);
+  }
+  return a;
+}
+
+/* ---------------- kernels ------------------------------------------- */
+const KERNELS = {
+  vedge:[[-1,0,1],[-2,0,2],[-1,0,1]],
+  hedge:[[-1,-2,-1],[0,0,0],[1,2,1]],
+  diag: [[-2,-1,0],[-1,0,1],[0,1,2]],
+  blur: [[1/9,1/9,1/9],[1/9,1/9,1/9],[1/9,1/9,1/9]],
+  sharp:[[0,-1,0],[-1,5,-1],[0,-1,0]],
+  ident:[[0,0,0],[0,1,0],[0,0,0]],
+};
+const KERNEL_BANK = [
+  ["vertical edge", KERNELS.vedge],
+  ["horizontal edge", KERNELS.hedge],
+  ["diagonal", KERNELS.diag],
+  ["blur", KERNELS.blur],
+  ["sharpen", KERNELS.sharp],
+  ["corner", [[-1,-1,0],[-1,2,1],[0,1,1]]],
+];
+
+function pad2d(a, p){
+  if (!p) return a;
+  const n = a.length, m = n + 2*p;
+  const out = Array.from({length:m}, () => new Float64Array(m));
+  for (let r=0;r<n;r++) for (let c=0;c<n;c++) out[r+p][c+p] = a[r][c];
+  return out;
+}
+function convolve(a, k, stride, p){
+  const A = pad2d(a, p), kh = k.length;
+  const h = Math.floor((A.length - kh)/stride) + 1;
+  const out = Array.from({length:h}, () => new Float64Array(h));
+  for (let i=0;i<h;i++) for (let j=0;j<h;j++){
+    let s = 0;
+    for (let u=0;u<kh;u++) for (let v=0;v<kh;v++) s += A[i*stride+u][j*stride+v] * k[u][v];
+    out[i][j] = s;
+  }
+  return out;
+}
+
+/* ---------------- drawing helpers ----------------------------------- */
+function fitCanvas(cv, cssH){
+  const w = cv.parentElement.clientWidth - 20;
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.max(80, Math.round(w * dpr));
+  cv.height = Math.round(cssH * dpr);
+  cv.style.height = cssH + "px";
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,cssH);
+  return {ctx, w, h: cssH};
+}
+function grayColour(v){
+  const t = Math.max(0, Math.min(1, v/1.2));
+  const g = Math.round(255*t);
+  return `rgb(${g},${g},${g})`;
+}
+function divergeColour(v, scale){
+  const t = Math.max(-1, Math.min(1, v/scale));
+  if (t >= 0){
+    const f = 1 - t;
+    return `rgb(${Math.round(255*f*0.75+30)},${Math.round(255*f*0.85+55)},${Math.round(255*f*0.4+120)})`;
+  } else {
+    const f = 1 + t;
+    return `rgb(${Math.round(255*f*0.35+158)},${Math.round(255*f*0.8+61)},${Math.round(255*f*0.8+44)})`;
+  }
+}
+function drawGrid(ctx, data, x0, y0, size, colourFn, gridLines){
+  const n = data.length, cell = size/n;
+  for (let r=0;r<n;r++) for (let c=0;c<n;c++){
+    ctx.fillStyle = colourFn(data[r][c]);
+    ctx.fillRect(x0 + c*cell, y0 + r*cell, cell+0.6, cell+0.6);
+  }
+  if (gridLines && cell > 7){
+    ctx.strokeStyle = "rgba(120,130,150,0.20)"; ctx.lineWidth = 0.5;
+    for (let i=0;i<=n;i++){
+      ctx.beginPath(); ctx.moveTo(x0+i*cell, y0); ctx.lineTo(x0+i*cell, y0+size); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x0, y0+i*cell); ctx.lineTo(x0+size, y0+i*cell); ctx.stroke();
+    }
+  }
+  ctx.strokeStyle = C.grey; ctx.lineWidth = 1;
+  ctx.strokeRect(x0, y0, size, size);
+}
+function maxAbs(a){
+  let m = 1e-9;
+  for (const row of a) for (const v of row) m = Math.max(m, Math.abs(v));
+  return m;
+}
+
+/* =================== TAB 1: the walk =============================== */
+const T1 = {
+  img:null, kern:null, out:null, pos:0, total:0, timer:null, custom:[[0,0,0],[0,1,0],[0,0,0]]
+};
+const el = id => document.getElementById(id);
+
+function currentKernel(){
+  const sel = el("kern").value;
+  return sel === "custom" ? T1.custom : KERNELS[sel];
+}
+function buildKernelInputs(){
+  const g = el("kgrid");
+  const isCustom = el("kern").value === "custom";
+  g.innerHTML = "";
+  if (!isCustom) return;
+  for (let r=0;r<3;r++) for (let c=0;c<3;c++){
+    const inp = document.createElement("input");
+    inp.type = "number"; inp.step = "0.5"; inp.value = T1.custom[r][c];
+    inp.oninput = () => { T1.custom[r][c] = parseFloat(inp.value)||0; resetWalk(); };
+    g.appendChild(inp);
+  }
+}
+function resetWalk(){
+  stopWalk();
+  T1.img = makeImage(el("img").value);
+  T1.kern = currentKernel();
+  const stride = +el("stride").value, p = +el("pad").value;
+  const size = Math.floor((N + 2*p - 3)/stride) + 1;
+  T1.out = Array.from({length:size}, () => new Float64Array(size).fill(NaN));
+  T1.pos = 0; T1.total = size*size;
+  el("sIn").textContent = `${N} x ${N}`;
+  el("sOut").textContent = `${size} x ${size}`;
+  el("sWts").textContent = "9";
+  el("sumText").textContent = "Press Walk, or Step to go one position at a time.";
+  drawWalk();
+}
+function stepWalk(){
+  const stride = +el("stride").value, p = +el("pad").value;
+  const size = T1.out.length;
+  if (T1.pos >= size*size){ stopWalk(); return; }
+  const i = Math.floor(T1.pos/size), j = T1.pos % size;
+  const A = pad2d(T1.img, p);
+  let s = 0; const terms = [];
+  for (let u=0;u<3;u++) for (let v=0;v<3;v++){
+    const a = A[i*stride+u][j*stride+v], k = T1.kern[u][v];
+    s += a*k;
+    if (k !== 0) terms.push(`${a.toFixed(2)}x${k}`);
+  }
+  T1.out[i][j] = s;
+  el("sPos").textContent = `${T1.pos+1} / ${size*size}`;
+  el("sResp").textContent = s.toFixed(2);
+  el("sumText").textContent = (terms.slice(0,5).join(" + ") + (terms.length>5 ? " + ..." : "")) +
+                              " = " + s.toFixed(3);
+  T1.pos++;
+  drawWalk();
+}
+function drawWalk(){
+  const stride = +el("stride").value, p = +el("pad").value;
+  const size = T1.out.length;
+  const i = Math.min(Math.floor(T1.pos/size), size-1), j = Math.max(0, (T1.pos-1)) % size;
+
+  // input
+  {
+    const {ctx, w} = fitCanvas(el("cIn"), 320);
+    const S = Math.min(w-6, 305);
+    drawGrid(ctx, T1.img, 3, 5, S, grayColour, true);
+    if (T1.pos > 0){
+      const cell = S/N;
+      const rr = Math.floor((T1.pos-1)/size)*stride - p, cc = ((T1.pos-1)%size)*stride - p;
+      ctx.strokeStyle = C.amber; ctx.lineWidth = 2.6;
+      ctx.strokeRect(3 + cc*cell, 5 + rr*cell, 3*cell, 3*cell);
+    }
+  }
+  // kernel with the live patch
+  {
+    const {ctx, w} = fitCanvas(el("cKern"), 200);
+    const S = Math.min(w*0.42, 88), gap = 22;
+    const A = pad2d(T1.img, p);
+    const rr = Math.max(0, Math.floor((T1.pos-1)/size))*stride;
+    const cc = Math.max(0, (T1.pos-1)%size)*stride;
+    const patch = [0,1,2].map(u => [0,1,2].map(v => (T1.pos>0 ? A[rr+u][cc+v] : 0)));
+    ctx.font = "600 10px Helvetica"; ctx.fillStyle = C.grey; ctx.textAlign = "center";
+    ctx.fillText("patch", 4+S/2, 14);
+    ctx.fillText("kernel", 4+S+gap+S/2, 14);
+    drawGrid(ctx, patch, 4, 20, S, grayColour, true);
+    const km = maxAbs(T1.kern);
+    drawGrid(ctx, T1.kern, 4+S+gap, 20, S, v => divergeColour(v, km), true);
+    ctx.fillStyle = C.slate; ctx.font = "700 15px Helvetica";
+    ctx.fillText("x", 4+S+gap/2, 20+S/2+5);
+    // numbers on the kernel
+    ctx.font = "600 9px Helvetica";
+    for (let r=0;r<3;r++) for (let c=0;c<3;c++){
+      const v = T1.kern[r][c];
+      ctx.fillStyle = Math.abs(v) > km*0.55 ? "#fff" : C.slate;
+      ctx.fillText(String(Math.round(v*100)/100), 4+S+gap + (c+0.5)*S/3, 20 + (r+0.62)*S/3);
+    }
+  }
+  // feature map
+  {
+    const {ctx, w} = fitCanvas(el("cOut"), 320);
+    const S = Math.min(w-6, 305);
+    const shown = T1.out.map(row => Array.from(row, v => isNaN(v) ? 0 : v));
+    const m = Math.max(0.6, maxAbs(shown));
+    const cell = S/size;
+    for (let r=0;r<size;r++) for (let c=0;c<size;c++){
+      const v = T1.out[r][c];
+      ctx.fillStyle = isNaN(v) ? "#F4F6F9" : divergeColour(v, m);
+      ctx.fillRect(3 + c*cell, 5 + r*cell, cell+0.6, cell+0.6);
+    }
+    ctx.strokeStyle = C.grey; ctx.lineWidth = 1; ctx.strokeRect(3, 5, S, S);
+    if (T1.pos > 0 && T1.pos <= size*size){
+      const rr = Math.floor((T1.pos-1)/size), cc = (T1.pos-1)%size;
+      ctx.strokeStyle = C.amber; ctx.lineWidth = 2.4;
+      ctx.strokeRect(3+cc*cell, 5+rr*cell, cell, cell);
+    }
+  }
+}
+function playWalk(){
+  if (T1.timer) return stopWalk();
+  el("play").textContent = "Pause";
+  const delays = [420, 180, 70, 22, 4];
+  const d = delays[+el("speed").value - 1];
+  T1.timer = setInterval(() => {
+    const reps = d <= 5 ? 12 : 1;
+    for (let i=0;i<reps;i++) stepWalk();
+    if (T1.pos >= T1.out.length**2) stopWalk();
+  }, d);
+}
+function stopWalk(){
+  if (T1.timer) clearInterval(T1.timer);
+  T1.timer = null;
+  el("play").textContent = "Walk";
+}
+function finishWalk(){
+  stopWalk();
+  while (T1.pos < T1.out.length**2) stepWalk();
+}
+
+/* =================== TAB 2: filter bank ============================ */
+function drawBank(){
+  const img = makeImage(el("img2").value);
+  const act = el("relu").value, pool = el("pool").value;
+  const cv = el("cBank");
+  const {ctx, w} = fitCanvas(cv, 260);
+  const cols = 7, gap = 8;
+  const S = Math.min((w - gap*(cols+1))/cols, 118);
+  ctx.font = "600 10.5px Helvetica"; ctx.textAlign = "center";
+
+  ctx.fillStyle = C.slate; ctx.fillText("the input", gap + S/2, 12);
+  drawGrid(ctx, img, gap, 18, S, grayColour, false);
+
+  KERNEL_BANK.forEach(([name, k], idx) => {
+    let out = convolve(img, k, 1, 1);
+    if (act === "relu") out = out.map(r => Array.from(r, v => Math.max(0, v)));
+    if (act === "abs")  out = out.map(r => Array.from(r, v => Math.abs(v)));
+    if (pool !== "none"){
+      const n = out.length, h = Math.floor(n/2);
+      const p = Array.from({length:h}, () => new Float64Array(h));
+      for (let r=0;r<h;r++) for (let c=0;c<h;c++){
+        const vals = [out[2*r][2*c], out[2*r][2*c+1], out[2*r+1][2*c], out[2*r+1][2*c+1]];
+        p[r][c] = pool === "max2" ? Math.max(...vals) : vals.reduce((a,b)=>a+b,0)/4;
+      }
+      out = p;
+    }
+    const x0 = gap + (idx+1)*(S+gap);
+    const m = maxAbs(out);
+    ctx.fillStyle = C.slate; ctx.fillText(name, x0 + S/2, 12);
+    drawGrid(ctx, out, x0, 18, S, v => divergeColour(v, m), false);
+    ctx.fillStyle = C.grey; ctx.font = "9.5px Helvetica";
+    ctx.fillText(`${out.length} x ${out.length}`, x0 + S/2, 18 + S + 12);
+    ctx.font = "600 10.5px Helvetica";
+  });
+}
+
+/* =================== TAB 3: receptive field ======================== */
+function drawRF(){
+  const L = +el("layers").value, k = +el("ksize").value, pe = +el("poolEvery").value;
+  el("layersVal").textContent = L; el("ksizeVal").textContent = k; el("poolEveryVal").textContent = pe;
+
+  let rf = 1, jump = 1;
+  const rows = [];
+  for (let i=1;i<=L;i++){
+    rf = rf + (k-1)*jump;
+    rows.push({layer:i, op:`conv ${k}x${k}`, rf, jump});
+    if (i % pe === 0){
+      rf = rf + (2-1)*jump; jump *= 2;
+      rows.push({layer:i, op:"pool 2x2", rf, jump});
+    }
+  }
+  // table
+  let html = '<table class="kt"><tr><th>after</th><th>sees</th><th>pixels</th><th>stride</th></tr>';
+  for (const r of rows){
+    const big = r.rf >= 32;
+    html += `<tr><td>${r.op}</td><td style="color:${big?C.red:C.ink};font-weight:${big?700:400}">${r.rf} x ${r.rf}</td>` +
+            `<td>${Math.min(r.rf*r.rf, 1024)}</td><td>${r.jump}</td></tr>`;
+  }
+  html += "</table>";
+  html += `<div class="lbl">The recurrence: <b>r<sub>1</sub> = k</b>, then
+           <b>r<sub>L</sub> = r<sub>L&minus;1</sub> + (k&minus;1) &times; (product of earlier strides)</b>.
+           A 32 x 32 image is fully covered once the field reaches 32.</div>`;
+  el("rfTable").innerHTML = html;
+
+  const {ctx, w} = fitCanvas(el("cRF"), 360);
+  const S = Math.min(w-8, 330);
+  drawGrid(ctx, makeImage("edges").map(r => Array.from(r, v => v*0.45 + 0.12)), 4, 8, S, grayColour, false);
+  const cell = S/N, cx = 4 + S/2, cy = 8 + S/2;
+  const shown = rows.filter((r,i) => i === rows.length-1 || r.op.startsWith("conv"));
+  shown.forEach((r, i) => {
+    const t = shown.length === 1 ? 1 : i/(shown.length-1);
+    const col = `hsl(${205 - 95*t}, ${45+25*t}%, ${58-14*t}%)`;
+    const side = Math.min(r.rf, N) * cell;
+    ctx.strokeStyle = col; ctx.lineWidth = 2.1;
+    ctx.strokeRect(cx - side/2, cy - side/2, side, side);
+    ctx.fillStyle = col; ctx.font = "700 10.5px Helvetica"; ctx.textAlign = "left";
+    ctx.fillText(`L${r.layer}: ${r.rf}px`, cx + side/2 + 3, cy - side/2 + 11);
+  });
+  ctx.fillStyle = C.red;
+  ctx.beginPath(); ctx.arc(cx, cy, 3.2, 0, 7); ctx.fill();
+}
+
+/* =================== TAB 4: shuffle =============================== */
+let PERM = null;
+function newPerm(){
+  PERM = Array.from({length:N*N}, (_,i) => i);
+  for (let i=PERM.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [PERM[i], PERM[j]] = [PERM[j], PERM[i]];
+  }
+}
+function drawShuffle(){
+  if (!PERM) newPerm();
+  const base = makeImage(el("img4").value);
+  const mode = el("damage").value;
+  let img;
+  if (mode === "none") img = base;
+  else if (mode === "shift"){
+    img = Array.from({length:N}, () => new Float64Array(N));
+    for (let r=0;r<N;r++) for (let c=0;c<N;c++) img[r][c] = base[r][(c - 5 + N) % N];
+  } else {
+    const flat = [];
+    for (let r=0;r<N;r++) for (let c=0;c<N;c++) flat.push(base[r][c]);
+    img = Array.from({length:N}, () => new Float64Array(N));
+    for (let i=0;i<N*N;i++) img[Math.floor(i/N)][i%N] = flat[PERM[i]];
+  }
+  const e0 = convolve(base, KERNELS.vedge, 1, 1);
+  const e1 = convolve(img,  KERNELS.vedge, 1, 1);
+  const energy = a => { let s=0; for (const row of a) for (const v of row) s += v*v; return Math.sqrt(s/(a.length**2)); };
+  const E0 = energy(e0), E1 = energy(e1);
+
+  {
+    const {ctx, w} = fitCanvas(el("cS1"), 250);
+    const S = Math.min(w-6, 238);
+    drawGrid(ctx, img, 3, 5, S, grayColour, false);
+  }
+  {
+    const {ctx, w} = fitCanvas(el("cS2"), 250);
+    const S = Math.min(w-6, 238);
+    drawGrid(ctx, e1, 3, 5, S, v => divergeColour(v, Math.max(1, maxAbs(e0))), false);
+  }
+  {
+    const {ctx, w} = fitCanvas(el("cS3"), 250);
+    const bins = new Array(20).fill(0);
+    for (const row of img) for (const v of row)
+      bins[Math.max(0, Math.min(19, Math.floor(v/1.4*20)))]++;
+    const mx = Math.max(...bins), S = 238, x0 = 26, y0 = 12, hh = 200;
+    ctx.strokeStyle = C.line;
+    for (let i=0;i<bins.length;i++){
+      const bw = (S-x0-6)/bins.length;
+      const h = bins[i]/mx*hh;
+      ctx.fillStyle = C.slate;
+      ctx.fillRect(x0 + i*bw + 1, y0 + hh - h, bw-2, h);
+    }
+    ctx.fillStyle = C.grey; ctx.font = "10px Helvetica"; ctx.textAlign = "left";
+    ctx.fillText("dark", x0, y0+hh+13); ctx.textAlign = "right";
+    ctx.fillText("bright", x0 + (S-x0-6), y0+hh+13);
+    ctx.textAlign = "center"; ctx.fillStyle = C.slate;
+    ctx.fillText("identical in every mode", x0 + (S-x0)/2, y0+hh+27);
+  }
+  el("sE0").textContent = E0.toFixed(3);
+  el("sE1").textContent = E1.toFixed(3);
+  const pc = (E1/E0 - 1)*100;
+  el("sEd").textContent = (pc>0?"+":"") + pc.toFixed(0) + "%";
+  el("sEd").style.color = Math.abs(pc) > 25 ? C.red : C.slate;
+  el("sKeep").textContent = "100%";
+}
+
+/* =================== wiring ======================================= */
+document.querySelectorAll(".tab").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    for (const t of ["walk","bank","depth","shuffle"])
+      el("tab-"+t).classList.toggle("hide", t !== b.dataset.tab);
+    if (b.dataset.tab === "bank") drawBank();
+    if (b.dataset.tab === "depth") drawRF();
+    if (b.dataset.tab === "shuffle") drawShuffle();
+    if (b.dataset.tab === "walk") drawWalk();
+  };
+});
+
+el("play").onclick = playWalk;
+el("stepBtn").onclick = () => { stopWalk(); stepWalk(); };
+el("finish").onclick = finishWalk;
+el("reset").onclick = resetWalk;
+el("img").onchange = resetWalk;
+el("kern").onchange = () => { buildKernelInputs(); resetWalk(); };
+el("stride").oninput = () => { el("strideVal").textContent = el("stride").value; resetWalk(); };
+el("pad").oninput = () => { el("padVal").textContent = el("pad").value; resetWalk(); };
+el("speed").oninput = () => {
+  el("speedVal").textContent = ["very slow","slow","medium","fast","instant"][+el("speed").value-1];
+  if (T1.timer){ stopWalk(); playWalk(); }
+};
+["img2","relu","pool"].forEach(id => el(id).onchange = drawBank);
+["layers","ksize","poolEvery"].forEach(id => el(id).oninput = drawRF);
+["img4","damage"].forEach(id => el(id).onchange = drawShuffle);
+el("reshuffle").onclick = () => { newPerm(); drawShuffle(); };
+window.addEventListener("resize", () => {
+  drawWalk();
+  if (!el("tab-bank").classList.contains("hide")) drawBank();
+  if (!el("tab-depth").classList.contains("hide")) drawRF();
+  if (!el("tab-shuffle").classList.contains("hide")) drawShuffle();
+});
+
+buildKernelInputs();
+resetWalk();
+</script>
+</body>
+</html>

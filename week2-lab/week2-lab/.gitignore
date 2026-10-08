@@ -1,0 +1,26 @@
+# Environments
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+
+# Secrets — never commit a token
+.env
+*.token
+secrets.*
+
+# Notebook noise
+.ipynb_checkpoints/
+
+# Generated output — regenerate with `python run_lab.py` instead
+figures/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Submission tooling
+.student_number
+submission-week*.zip

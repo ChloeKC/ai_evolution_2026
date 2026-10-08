@@ -1,0 +1,6 @@
+# Week 3 Lab, the PyTorch half. Roughly 2 GB; install when you have the disk.
+-r requirements.txt
+torch>=2.2
+# CPU-only wheels are much smaller. On Linux/Windows:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# In Google Colab, torch is already installed: skip this file entirely.

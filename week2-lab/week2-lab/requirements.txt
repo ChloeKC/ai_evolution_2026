@@ -1,0 +1,14 @@
+# Week 2 Lab: Responsible AI
+# Core (required)
+numpy>=1.26
+pandas>=2.0
+scikit-learn>=1.3
+matplotlib>=3.7
+scipy>=1.11
+
+# Explainability (optional: explain.py has a from-scratch LIME fallback)
+shap>=0.44
+lime>=0.2.0.1
+
+# Notebook slider (optional)
+ipywidgets>=8.0

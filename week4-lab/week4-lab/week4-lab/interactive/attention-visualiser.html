@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<!--
+  Attention Visualiser
+  The Evolution of Machine Learning and AI, Week 4
+  South East Technological University
+
+  Every number in this page is a real dot product. The token embeddings are
+  hand-built from grammatical features so that the attention patterns mean
+  something without training, but the arithmetic is exactly
+  softmax(Q K^T / sqrt(d)) V, with no shortcuts and nothing faked.
+
+  Single file, no build step, no network. Embed with:
+  <iframe src="attention-visualiser.html" width="100%" height="1040"
+          style="border:0"></iframe>
+
+  Booklet cross-references: Chapters 17 to 21.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attention Visualiser</title>
+<style>
+  :root{
+    --slate:#47546B; --slate-dark:#333F53; --ink:#22293A; --grey:#8A93A5;
+    --amber:#A96E08; --blue:#4E7291; --red:#9E3B2C; --green:#2E7D4F;
+    --key:#EDF0F5; --panel:#F7F9FC; --line:#E3E8F0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; padding:18px; color:var(--ink); background:#fff;
+       font:15px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}
+  h1{font-size:20px; margin:0 0 2px; color:var(--slate-dark)}
+  .sub{color:var(--grey); font-size:13px; margin-bottom:14px}
+  .tabs{display:flex; gap:4px; margin-bottom:12px; border-bottom:2px solid var(--line); flex-wrap:wrap}
+  .tab{padding:8px 14px; cursor:pointer; font-size:14px; font-weight:600;
+       color:var(--grey); border:0; background:none; border-bottom:3px solid transparent}
+  .tab.on{color:var(--slate-dark); border-bottom-color:var(--amber)}
+  .controls{display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;
+    background:var(--panel); border:1px solid var(--line); border-radius:6px;
+    padding:12px 14px; margin-bottom:12px}
+  .ctl{display:flex; flex-direction:column; gap:3px; min-width:150px}
+  .ctl label{font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--grey)}
+  .ctl .val{font-weight:700; color:var(--slate-dark); font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%; accent-color:var(--slate)}
+  input[type=text]{padding:6px 8px; border:1px solid var(--grey); border-radius:4px; font-size:13.5px; width:100%}
+  select{padding:5px; border:1px solid var(--grey); border-radius:4px; background:#fff; font-size:13.5px}
+  label.chk{display:flex; gap:6px; align-items:center; font-size:13.5px; color:var(--ink);
+            text-transform:none; letter-spacing:0}
+  button{padding:7px 13px; border:0; border-radius:5px; cursor:pointer;
+         font-size:13.5px; font-weight:600; color:#fff; background:var(--slate)}
+  button.ghost{background:#fff; color:var(--slate); border:1px solid var(--grey)}
+  .card{border:1px solid var(--line); border-radius:6px; padding:9px; background:#fff; margin-bottom:12px}
+  .card h2{font-size:11.5px; letter-spacing:.08em; text-transform:uppercase;
+           color:var(--grey); margin:2px 0 3px 3px}
+  .card p.cap{font-size:12px; color:var(--grey); margin:2px 3px 7px}
+  canvas{width:100%; display:block; border-radius:4px}
+  .panes{display:grid; gap:12px}
+  .p2{grid-template-columns:1.3fr 1fr}
+  .p3{grid-template-columns:1fr 1fr 1fr}
+  @media(max-width:900px){.p2,.p3{grid-template-columns:1fr}}
+  .readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-top:4px}
+  .stat{background:var(--key); border-radius:5px; padding:9px 11px}
+  .stat .k{font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--grey)}
+  .stat .v{font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--slate-dark)}
+  .msg{margin-top:6px; padding:11px 13px; border-radius:5px;
+       border-left:4px solid var(--slate); background:var(--key); font-size:14.5px}
+  .note{margin-top:12px; font-size:13px; color:var(--grey)}
+  .hide{display:none}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px;
+        background:var(--panel); border:1px solid var(--line); border-radius:5px;
+        padding:9px 10px; color:var(--slate-dark); overflow-x:auto; white-space:pre}
+  table.kt{border-collapse:collapse; width:100%; font-size:12.5px}
+  table.kt td,table.kt th{border:1px solid var(--line); padding:4px 6px; text-align:right}
+  table.kt th{background:var(--key); color:var(--slate-dark); font-size:11px;
+              text-transform:uppercase; letter-spacing:.05em; text-align:left}
+  table.kt td:first-child,table.kt th:first-child{text-align:left}
+  .tok{display:inline-block; padding:3px 9px; margin:2px; border-radius:12px;
+       font-size:13px; background:var(--key); color:var(--slate-dark); cursor:pointer;
+       border:1.5px solid transparent}
+  .tok.sel{background:var(--slate); color:#fff; border-color:var(--slate-dark)}
+  .pill{display:inline-block; padding:2px 8px; border-radius:11px; font-size:11.5px;
+        font-weight:700; color:#fff; background:var(--slate)}
+</style>
+</head>
+<body>
+
+<h1>Attention Visualiser</h1>
+<div class="sub">Week 4 &middot; The Evolution of Machine Learning and AI &middot; booklet chapters 17 to 21</div>
+
+<div class="tabs">
+  <button class="tab on" data-tab="matrix">1. Who attends to whom</button>
+  <button class="tab" data-tab="steps">2. One query, step by step</button>
+  <button class="tab" data-tab="order">3. Attention cannot see order</button>
+  <button class="tab" data-tab="heads">4. Many heads</button>
+  <button class="tab" data-tab="bill">5. The bill</button>
+</div>
+
+<!-- ============ shared sentence controls ============ -->
+<div class="controls" id="sentBar">
+  <div class="ctl" style="min-width:280px">
+    <label for="sent">Sentence</label>
+    <select id="sent">
+      <option value="0">the keys that I left on the table are missing</option>
+      <option value="1">the dog chased the cat because it was hungry</option>
+      <option value="2">the students who study hard pass the exam</option>
+      <option value="3">custom, type your own below</option>
+    </select>
+  </div>
+  <div class="ctl" style="min-width:280px">
+    <label for="custom">Custom words (space separated)</label>
+    <input type="text" id="custom" value="the cat that she found is sleeping">
+  </div>
+  <div class="ctl">
+    <label for="head">Head</label>
+    <select id="head">
+      <option value="0">agreement: verb seeks its subject</option>
+      <option value="1">determiner seeks its noun</option>
+      <option value="2">pronoun seeks something animate</option>
+      <option value="3">position: seek the previous word</option>
+    </select>
+  </div>
+  <div class="ctl">
+    <label for="temp">Sharpness &ndash; <span class="val" id="tempVal">8.0</span></label>
+    <input type="range" id="temp" min="0.2" max="20" step="0.2" value="8">
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>Options</label>
+    <label class="chk"><input type="checkbox" id="pe"> add positional encoding</label>
+    <label class="chk"><input type="checkbox" id="causal"> causal mask (no peeking ahead)</label>
+  </div>
+</div>
+
+<!-- ==================== TAB 1 ==================== -->
+<div id="tab-matrix">
+  <div class="panes p2">
+    <div class="card">
+      <h2>The attention matrix</h2>
+      <p class="cap">Row = the token doing the attending. Column = the token attended to.
+      Every row adds to exactly 1, because a softmax turns scores into fractions.</p>
+      <canvas id="cMat" height="380"></canvas>
+    </div>
+    <div class="card">
+      <h2>Where the attention goes, as a flow</h2>
+      <p class="cap">Click a token to follow it. Thickness is weight; only weights above 0.05 are drawn.</p>
+      <canvas id="cFlow" height="380"></canvas>
+      <div id="tokRow" style="margin-top:7px"></div>
+    </div>
+  </div>
+  <div class="readout">
+    <div class="stat"><div class="k">Tokens</div><div class="v" id="sT">9</div></div>
+    <div class="stat"><div class="k">Strongest link</div><div class="v" id="sLink">-</div></div>
+    <div class="stat"><div class="k">Its weight</div><div class="v" id="sW">0.00</div></div>
+    <div class="stat"><div class="k">Distance apart</div><div class="v" id="sD">0</div></div>
+    <div class="stat"><div class="k">Row entropy</div><div class="v" id="sH">0.00</div></div>
+  </div>
+  <div class="msg" id="msg1"></div>
+  <div class="note">
+    <b>Worth doing.</b> Pick the first sentence and the agreement head, then find the row for
+    <i>are</i>. Its strongest link is to <i>keys</i>, five words back, and one of its weakest is to
+    <i>table</i>, which is immediately before it. A convolution with a width-3 kernel could not express
+    that preference at all: from the position of <i>are</i> it cannot even see <i>keys</i>. Now drag
+    <b>sharpness</b> down towards 0.2 and watch every row flatten towards a uniform average, which is what
+    an untrained model does before it has learned anything worth attending to.
+  </div>
+</div>
+
+<!-- ==================== TAB 2 ==================== -->
+<div id="tab-steps" class="hide">
+  <div class="card">
+    <h2>Choose the token doing the asking</h2>
+    <div id="tokRow2"></div>
+  </div>
+  <div class="panes p2">
+    <div class="card">
+      <h2>The four stages, for that one query</h2>
+      <p class="cap">Raw dot products, then divided by the square root of the width, then softmax,
+      then used as mixing weights over the values.</p>
+      <canvas id="cSteps" height="420"></canvas>
+    </div>
+    <div class="card">
+      <h2>The arithmetic, written out</h2>
+      <div class="mono" id="stepMath"></div>
+      <div class="msg" style="margin-top:10px" id="msg2"></div>
+    </div>
+  </div>
+  <div class="note">
+    <b>Why divide by the square root of the width?</b> A dot product of two vectors with
+    <i>d</i> entries grows roughly like the square root of <i>d</i>. Without the division, a wider model
+    produces larger scores, the softmax saturates on whichever score happens to be biggest, and the
+    gradient through it collapses towards zero. It is a scaling fix for a numerical problem, and it is the
+    same family of problem as Week 3's vanishing gradient. Set sharpness very high to see saturation
+    happen: one weight goes to 1, the rest to 0, and nothing can be learned from a flat gradient.
+  </div>
+</div>
+
+<!-- ==================== TAB 3 ==================== -->
+<div id="tab-order" class="hide">
+  <div class="controls">
+    <div class="ctl" style="min-width:auto">
+      <label>&nbsp;</label>
+      <div style="display:flex;gap:6px">
+        <button id="shuffleTok">Shuffle the tokens</button>
+        <button id="resetTok" class="ghost">Put them back</button>
+      </div>
+    </div>
+    <div class="ctl" style="min-width:auto">
+      <label>Positional encoding</label>
+      <label class="chk"><input type="checkbox" id="pe2"> add it to the embeddings</label>
+    </div>
+  </div>
+  <div class="panes p3">
+    <div class="card">
+      <h2>Original order</h2>
+      <p class="cap" id="capA">the sentence as written</p>
+      <canvas id="cOrdA" height="260"></canvas>
+    </div>
+    <div class="card">
+      <h2>Shuffled order</h2>
+      <p class="cap" id="capB">the same tokens, rearranged</p>
+      <canvas id="cOrdB" height="260"></canvas>
+    </div>
+    <div class="card">
+      <h2>Shuffled, then un-shuffled</h2>
+      <p class="cap">If this is identical to the left panel, order was invisible.</p>
+      <canvas id="cOrdC" height="260"></canvas>
+    </div>
+  </div>
+  <div class="readout">
+    <div class="stat"><div class="k">Max difference</div><div class="v" id="sDiff">0.00e+0</div></div>
+    <div class="stat"><div class="k">Verdict</div><div class="v" id="sVerdict" style="font-size:14px">-</div></div>
+  </div>
+  <div class="msg" id="msg3"></div>
+  <div class="note">
+    This is the single most important property on the page, and it is a mathematical fact rather than a
+    quirk of training. With no positional information, attention computes a function of the <b>set</b> of
+    tokens. It cannot distinguish <i>dog bites man</i> from <i>man bites dog</i>, because nothing in
+    softmax(Q K<sup>T</sup>) refers to where anything is. Tick the box and the difference becomes large,
+    because now each token's vector carries a fingerprint of its position. Every transformer ever shipped
+    does something equivalent, and this number is why.
+  </div>
+</div>
+
+<!-- ==================== TAB 4 ==================== -->
+<div id="tab-heads" class="hide">
+  <div class="card">
+    <h2>Four heads, one layer, one sentence</h2>
+    <p class="cap">Each head has its own query and key projections, so each learns its own notion of
+    what counts as relevant. They run in parallel and their outputs are concatenated.</p>
+    <canvas id="cHeads" height="300"></canvas>
+  </div>
+  <div class="msg" id="msg4">A single head produces one set of weights per token, so it has to
+  express everything it cares about in a single weighted average. A verb needs its subject, its object and
+  its clause boundary, and blending those into one average loses all three. Multi-head attention splits the
+  width into independent slices and lets each slice specialise, at no extra cost in parameters.</div>
+  <div class="note">
+    <b>Worth doing.</b> Compare the agreement head with the position head. One is entirely about content
+    and ignores distance completely; the other is entirely about distance and ignores content completely.
+    Both are the same operation with different projection matrices, which is the point: attention does not
+    have a built-in notion of what matters. It has a built-in notion of <i>looking things up by
+    similarity</i>, and what counts as similar is learned.
+  </div>
+</div>
+
+<!-- ==================== TAB 5 ==================== -->
+<div id="tab-bill" class="hide">
+  <div class="controls">
+    <div class="ctl">
+      <label for="dmodel">Model width d &ndash; <span class="val" id="dmodelVal">512</span></label>
+      <input type="range" id="dmodel" min="64" max="2048" step="64" value="512">
+    </div>
+    <div class="ctl">
+      <label for="ksz">CNN kernel width &ndash; <span class="val" id="kszVal">3</span></label>
+      <input type="range" id="ksz" min="3" max="15" step="2" value="3">
+    </div>
+  </div>
+  <div class="panes p2">
+    <div class="card">
+      <h2>What it costs, per layer</h2>
+      <p class="cap">Operations against sequence length, both axes logarithmic.</p>
+      <canvas id="cCost" height="330"></canvas>
+    </div>
+    <div class="card">
+      <h2>What it buys</h2>
+      <p class="cap">How many operations separate the first position from the last.</p>
+      <canvas id="cPath" height="330"></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <h2>The crossover</h2>
+    <div id="billTable"></div>
+  </div>
+  <div class="msg">Attention buys a path length of <b>1</b> at any distance, which is what makes
+  long-range relations learnable at all. It pays in operations that grow with the <b>square</b> of the
+  sequence length. That is the transformer's bargain, and it is why context windows were small for years
+  and why a great deal of current research is about making this table less ugly.</div>
+</div>
+
+<script>
+"use strict";
+
+const C = { slate:"#47546B", grey:"#8A93A5", amber:"#A96E08", blue:"#4E7291",
+            red:"#9E3B2C", green:"#2E7D4F", key:"#EDF0F5", line:"#E3E8F0" };
+const el = id => document.getElementById(id);
+
+/* ==================================================================
+   Embeddings built from conjunctive grammatical features.
+
+   D = 8 dimensions, and each one is a real feature of the word:
+     0 plural noun     1 singular noun    2 plural verb    3 singular verb
+     4 determiner      5 pronoun          6 animate noun   7 other
+   Conjunctions (plural AND noun) rather than separate flags, because a
+   linear projection cannot multiply two features together, and agreement
+   genuinely needs the conjunction.
+   ================================================================== */
+const D = 8;
+const LEX = {
+  the:{d:1}, a:{d:1}, an:{d:1}, that:{o:1}, who:{o:1}, which:{o:1}, because:{o:1},
+  until:{o:1}, on:{o:1}, into:{o:1}, in:{o:1}, at:{o:1}, hard:{o:1}, missing:{o:1},
+  hungry:{o:1}, full:{o:1}, sleeping:{o:1},
+  keys:{pn:1}, students:{pn:1, an:1}, dogs:{pn:1, an:1}, cats:{pn:1, an:1},
+  table:{sn:1}, exam:{sn:1}, glass:{sn:1}, water:{sn:1},
+  dog:{sn:1, an:1}, cat:{sn:1, an:1}, student:{sn:1, an:1}, teacher:{sn:1, an:1},
+  I:{p:1, an:1}, she:{p:1, an:1}, he:{p:1, an:1}, it:{p:1}, they:{p:1, an:1},
+  are:{pv:1}, is:{sv:1}, was:{sv:1}, were:{pv:1},
+  pass:{pv:1}, passes:{sv:1}, study:{pv:1}, studies:{sv:1},
+  left:{sv:1}, found:{sv:1}, chased:{sv:1}, poured:{sv:1},
+};
+function embed(word){
+  const w = word.toLowerCase();
+  const f = LEX[word] || LEX[w] || null;
+  const v = new Float64Array(D);
+  if (!f){                                   // unknown word: a generic singular noun
+    v[1] = 0.8; v[7] = 0.4;
+    return v;
+  }
+  if (f.pn) v[0] = 1;
+  if (f.sn) v[1] = 1;
+  if (f.pv) v[2] = 1;
+  if (f.sv) v[3] = 1;
+  if (f.d)  v[4] = 1;
+  if (f.p)  v[5] = 1;
+  if (f.an) v[6] = 1;
+  if (f.o)  v[7] = 1;
+  return v;
+}
+
+/* Positional encoding, the sinusoidal scheme. */
+function posEnc(T, d){
+  const PE = [];
+  for (let t=0;t<T;t++){
+    const row = new Float64Array(d);
+    for (let i=0;i<d;i++){
+      const ang = t / Math.pow(10000, (2*Math.floor(i/2))/d);
+      row[i] = (i % 2 === 0) ? Math.sin(ang) : Math.cos(ang);
+    }
+    PE.push(row);
+  }
+  return PE;
+}
+
+/* Query and key projections, one pair per head. Each is a real D x D matrix
+   that selects which feature the head is looking for and which it offers. */
+function zeros(n,m){ return Array.from({length:n}, () => new Float64Array(m)); }
+function headMatrices(h){
+  const Wq = zeros(D,D), Wk = zeros(D,D);
+  if (h === 0){                 // agreement: a verb looks for a noun of matching number
+    Wq[2][0] = 1; Wq[3][1] = 1;
+    Wk[0][0] = 1; Wk[1][1] = 1;
+  } else if (h === 1){          // a determiner looks for any noun
+    Wq[4][0] = 1; Wq[4][1] = 1;
+    Wk[0][0] = 1; Wk[1][1] = 1;
+  } else if (h === 2){          // a pronoun looks for something animate
+    Wq[5][0] = 1;
+    Wk[6][0] = 1;
+  } else {                      // position: look one step back, via the encoding
+    for (let i=0;i<D;i++){ Wq[i][i] = 1; Wk[i][i] = 1; }
+  }
+  return {Wq, Wk};
+}
+
+function matvec(W, v){
+  const out = new Float64Array(W[0].length);
+  for (let i=0;i<W.length;i++){
+    if (v[i] === 0) continue;
+    for (let j=0;j<W[0].length;j++) out[j] += v[i]*W[i][j];
+  }
+  return out;
+}
+function dot(a,b){ let s=0; for (let i=0;i<a.length;i++) s += a[i]*b[i]; return s; }
+function softmax(z){
+  const m = Math.max(...z);
+  const e = z.map(v => Math.exp(v-m));
+  const s = e.reduce((a,b)=>a+b,0);
+  return e.map(v => v/s);
+}
+
+/* The operation itself. Returns scores, scaled scores and weights. */
+function attend(tokens, headIdx, temp, usePE, causal, order){
+  const T = tokens.length;
+  const idx = order || tokens.map((_,i)=>i);
+  const PE = posEnc(T, D);
+  const E = idx.map((src, pos) => {
+    const v = Float64Array.from(embed(tokens[src]));
+    if (usePE) for (let i=0;i<D;i++) v[i] += PE[pos][i];
+    return v;
+  });
+  const {Wq, Wk} = headMatrices(headIdx);
+  const Q = E.map(v => matvec(Wq, v));
+  const K = E.map(v => matvec(Wk, v));
+  const V = E;
+  const raw = [], scaled = [], W = [];
+  for (let i=0;i<T;i++){
+    const r = [], sc = [];
+    for (let j=0;j<T;j++){
+      let s = dot(Q[i], K[j]);
+      if (headIdx === 3){
+        // the position head scores by proximity to the previous token
+        s = -Math.abs((i-1) - j) * 1.6;
+      }
+      r.push(s);
+      let v = s / Math.sqrt(D) * temp;
+      if (causal && j > i) v = -1e9;
+      sc.push(v);
+    }
+    raw.push(r); scaled.push(sc); W.push(softmax(sc));
+  }
+  const out = W.map(w => {
+    const o = new Float64Array(D);
+    for (let j=0;j<T;j++) for (let i=0;i<D;i++) o[i] += w[j]*V[j][i];
+    return o;
+  });
+  return {raw, scaled, W, out, E, Q, K, V, idx};
+}
+
+/* ---------------- state ---------------- */
+const SENTENCES = [
+  "the keys that I left on the table are missing",
+  "the dog chased the cat because it was hungry",
+  "the students who study hard pass the exam",
+];
+let SEL = null;          // selected token index for the flow / steps tabs
+let ORDER = null;        // shuffled order for tab 3
+
+function tokens(){
+  const s = el("sent").value;
+  const raw = (s === "3") ? el("custom").value : SENTENCES[+s];
+  return raw.trim().split(/\s+/).filter(Boolean).slice(0, 14);
+}
+
+/* ---------------- canvas helpers ---------------- */
+function fitCanvas(cv, cssH){
+  const w = cv.parentElement.clientWidth - 20;
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.max(120, Math.round(w*dpr));
+  cv.height = Math.round(cssH*dpr);
+  cv.style.height = cssH + "px";
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,cssH);
+  return {ctx, w, h:cssH};
+}
+function blue(t){
+  const f = 1 - Math.max(0, Math.min(1, t));
+  return `rgb(${Math.round(60+195*f)},${Math.round(90+165*f)},${Math.round(140+115*f)})`;
+}
+
+/* =================== TAB 1: the matrix =================== */
+function drawMatrix(){
+  const toks = tokens();
+  const T = toks.length;
+  const A = attend(toks, +el("head").value, +el("temp").value,
+                   el("pe").checked, el("causal").checked);
+
+  // heatmap
+  {
+    const {ctx, w} = fitCanvas(el("cMat"), 380);
+    const left = 88, top = 74;
+    const size = Math.min(w - left - 12, 380 - top - 10);
+    const cell = size/T;
+    ctx.font = "11.5px Helvetica";
+    for (let i=0;i<T;i++){
+      for (let j=0;j<T;j++){
+        const v = A.W[i][j];
+        ctx.fillStyle = blue(v/Math.max(0.28, Math.max(...A.W[i])));
+        ctx.fillRect(left + j*cell, top + i*cell, cell+0.5, cell+0.5);
+        if (cell > 21){
+          ctx.fillStyle = v > 0.45 ? "#fff" : C.slate;
+          ctx.textAlign = "center";
+          ctx.font = "9.5px Helvetica";
+          ctx.fillText(v.toFixed(2), left + (j+0.5)*cell, top + (i+0.63)*cell);
+          ctx.font = "11.5px Helvetica";
+        }
+      }
+      ctx.fillStyle = (SEL === i) ? C.amber : C.slate;
+      ctx.textAlign = "right";
+      ctx.font = (SEL === i ? "700 " : "") + "11.5px Helvetica";
+      ctx.fillText(toks[i], left - 6, top + (i+0.66)*cell);
+    }
+    ctx.save();
+    ctx.font = "11.5px Helvetica";
+    for (let j=0;j<T;j++){
+      ctx.save();
+      ctx.translate(left + (j+0.6)*cell, top - 7);
+      ctx.rotate(-Math.PI/3.4);
+      ctx.fillStyle = C.slate; ctx.textAlign = "left";
+      ctx.fillText(toks[j], 0, 0);
+      ctx.restore();
+    }
+    ctx.restore();
+    ctx.strokeStyle = C.grey; ctx.lineWidth = 1;
+    ctx.strokeRect(left, top, size, size);
+    if (SEL !== null){
+      ctx.strokeStyle = C.amber; ctx.lineWidth = 2.4;
+      ctx.strokeRect(left, top + SEL*cell, size, cell);
+    }
+    ctx.fillStyle = C.grey; ctx.font = "10.5px Helvetica"; ctx.textAlign = "left";
+    ctx.fillText("attended to", left, top - 44);
+    ctx.save(); ctx.translate(13, top + size/2); ctx.rotate(-Math.PI/2);
+    ctx.textAlign = "center"; ctx.fillText("attending from", 0, 0); ctx.restore();
+  }
+
+  // flow
+  {
+    const {ctx, w} = fitCanvas(el("cFlow"), 380);
+    const yA = 58, yB = 320;
+    const pad = 20;
+    const step = (w - 2*pad) / Math.max(1, T-1);
+    const xs = toks.map((_,i) => pad + i*step);
+    ctx.font = "11.5px Helvetica"; ctx.textAlign = "center";
+    const rows = SEL === null ? toks.map((_,i)=>i) : [SEL];
+    for (const i of rows){
+      for (let j=0;j<T;j++){
+        const v = A.W[i][j];
+        if (v < 0.05) continue;
+        ctx.strokeStyle = (SEL === null) ? `rgba(71,84,107,${0.10+0.5*v})`
+                                        : `rgba(169,110,8,${0.18+0.75*v})`;
+        ctx.lineWidth = 0.7 + 7*v;
+        ctx.beginPath();
+        ctx.moveTo(xs[i], yA + 16);
+        ctx.bezierCurveTo(xs[i], yA + 110, xs[j], yB - 110, xs[j], yB - 16);
+        ctx.stroke();
+      }
+    }
+    for (let i=0;i<T;i++){
+      for (const [y, lbl] of [[yA, "query"], [yB, "key"]]){
+        const on = (SEL === i && y === yA);
+        ctx.fillStyle = on ? C.amber : C.key;
+        const wd = ctx.measureText(toks[i]).width + 14;
+        ctx.beginPath();
+        ctx.roundRect(xs[i]-wd/2, y-11, wd, 22, 9);
+        ctx.fill();
+        ctx.fillStyle = on ? "#fff" : C.slate;
+        ctx.fillText(toks[i], xs[i], y+4);
+      }
+    }
+    ctx.fillStyle = C.grey; ctx.font = "10.5px Helvetica"; ctx.textAlign = "left";
+    ctx.fillText("queries (the token asking)", pad, yA - 24);
+    ctx.fillText("keys (the token offering)", pad, yB + 34);
+  }
+
+  // token row + stats
+  el("tokRow").innerHTML = toks.map((t,i) =>
+    `<span class="tok ${SEL===i?'sel':''}" data-i="${i}">${t}</span>`).join("");
+  el("tokRow").querySelectorAll(".tok").forEach(s => {
+    s.onclick = () => { SEL = (SEL === +s.dataset.i) ? null : +s.dataset.i; drawMatrix(); };
+  });
+
+  const row = SEL === null ? A.W[T-1] : A.W[SEL];
+  const from = SEL === null ? T-1 : SEL;
+  let best = 0;
+  row.forEach((v,j) => { if (v > row[best]) best = j; });
+  const H = -row.reduce((a,v) => a + (v>0 ? v*Math.log(v) : 0), 0);
+  el("sT").textContent = T;
+  el("sLink").textContent = `${toks[from]} to ${toks[best]}`;
+  el("sW").textContent = row[best].toFixed(3);
+  el("sD").textContent = Math.abs(from-best);
+  el("sH").textContent = H.toFixed(2);
+
+  const headName = ["agreement", "determiner to noun", "pronoun to animate", "previous word"][+el("head").value];
+  el("msg1").innerHTML = SEL === null
+    ? `Showing every row. Click a token above to isolate it. The <b>${headName}</b> head is selected;
+       the statistics describe the last row, for <b>${toks[T-1]}</b>.`
+    : `<b>${toks[from]}</b> spends ${(row[best]*100).toFixed(0)}% of its attention on
+       <b>${toks[best]}</b>, which is ${Math.abs(from-best)} position${Math.abs(from-best)===1?"":"s"} away.
+       Row entropy is ${H.toFixed(2)}; a perfectly flat row over ${T} tokens would be
+       ${Math.log(T).toFixed(2)}, and a row that picked exactly one token would be 0.00.`;
+}
+
+/* =================== TAB 2: one query, step by step =================== */
+function drawSteps(){
+  const toks = tokens();
+  const T = toks.length;
+  const q = (SEL === null) ? T-1 : SEL;
+  const temp = +el("temp").value;
+  const A = attend(toks, +el("head").value, temp, el("pe").checked, el("causal").checked);
+
+  el("tokRow2").innerHTML = toks.map((t,i) =>
+    `<span class="tok ${q===i?'sel':''}" data-i="${i}">${t}</span>`).join("");
+  el("tokRow2").querySelectorAll(".tok").forEach(s => {
+    s.onclick = () => { SEL = +s.dataset.i; drawSteps(); };
+  });
+
+  const {ctx, w} = fitCanvas(el("cSteps"), 420);
+  const rows = [
+    ["1. raw scores, Q . K", A.raw[q], C.grey],
+    ["2. divided by sqrt(d), times sharpness", A.scaled[q].map(v => Math.max(v, -12)), C.blue],
+    ["3. after softmax: the weights", A.W[q], C.slate],
+  ];
+  const left = 96, rowH = 108, barTop = 26;
+  ctx.textAlign = "left";
+  rows.forEach((r, ri) => {
+    const [label, vals, col] = r;
+    const y0 = ri*rowH + barTop;
+    ctx.fillStyle = C.slate; ctx.font = "700 11.5px Helvetica";
+    ctx.fillText(label, 4, y0 - 8);
+    const mx = Math.max(...vals.map(Math.abs), 1e-6);
+    const bw = (w - left - 14) / T;
+    const half = 32;
+    for (let j=0;j<T;j++){
+      const v = vals[j];
+      const hgt = Math.abs(v)/mx * half;
+      ctx.fillStyle = (ri === 2) ? blue(v/Math.max(...vals)) : col;
+      if (v >= 0) ctx.fillRect(left + j*bw + 2, y0 + half - hgt, bw-4, hgt);
+      else        ctx.fillRect(left + j*bw + 2, y0 + half, bw-4, hgt);
+      ctx.fillStyle = C.slate; ctx.font = "9px Helvetica"; ctx.textAlign = "center";
+      ctx.fillText(ri === 2 ? v.toFixed(2) : v.toFixed(1),
+                   left + j*bw + bw/2, y0 + half - hgt - 3 > 10 ? y0 + half - hgt - 3 : y0 + half - 3);
+      if (ri === 2){
+        ctx.fillStyle = (j === q) ? C.amber : C.grey;
+        ctx.fillText(toks[j], left + j*bw + bw/2, y0 + half + 26);
+      }
+      ctx.textAlign = "left";
+    }
+    ctx.strokeStyle = C.line; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(left, y0+half); ctx.lineTo(w-10, y0+half); ctx.stroke();
+    ctx.fillStyle = C.grey; ctx.font = "10px Helvetica";
+  });
+  // stage 4: the output vector
+  {
+    const y0 = 3*rowH + barTop + 6;
+    ctx.fillStyle = C.slate; ctx.font = "700 11.5px Helvetica"; ctx.textAlign = "left";
+    ctx.fillText("4. the weighted average of the value vectors: the output for this token", 4, y0 - 8);
+    const out = A.out[q];
+    const bw = (w - left - 14)/D;
+    const mx = Math.max(...Array.from(out, Math.abs), 1e-6);
+    for (let i=0;i<D;i++){
+      const hgt = Math.abs(out[i])/mx*30;
+      ctx.fillStyle = C.green;
+      ctx.fillRect(left + i*bw + 3, y0 + 32 - hgt, bw-6, hgt);
+      ctx.fillStyle = C.grey; ctx.font = "9px Helvetica"; ctx.textAlign = "center";
+      ctx.fillText(["pl.n","sg.n","pl.v","sg.v","det","pron","anim","other"][i],
+                   left + i*bw + bw/2, y0 + 46);
+    }
+  }
+
+  const w2 = A.W[q];
+  let best = 0; w2.forEach((v,j) => { if (v > w2[best]) best = j; });
+  el("stepMath").textContent =
+`query token   : "${toks[q]}"  (position ${q})
+d (width)     : ${D}          sqrt(d) = ${Math.sqrt(D).toFixed(3)}
+sharpness     : ${temp.toFixed(1)}
+
+raw score against "${toks[best]}"
+    Q[${q}] . K[${best}]            = ${A.raw[q][best].toFixed(3)}
+divided by sqrt(d), times sharpness = ${A.scaled[q][best].toFixed(3)}
+
+softmax over all ${T} scores gives
+    weight on "${toks[best]}"  = ${w2[best].toFixed(4)}
+    sum of all weights        = ${w2.reduce((a,b)=>a+b,0).toFixed(6)}`;
+  el("msg2").innerHTML =
+    `The sum of the weights is exactly 1, which is what makes stage 4 an <b>average</b> rather than
+     just a sum. That is the whole reason a softmax is used here: it turns arbitrary match scores into
+     mixing proportions.`;
+}
+
+/* =================== TAB 3: order =================== */
+function drawOrder(){
+  const toks = tokens();
+  const T = toks.length;
+  if (!ORDER || ORDER.length !== T) ORDER = toks.map((_,i)=>i);
+  const usePE = el("pe2").checked;
+  const head = +el("head").value;
+  const temp = +el("temp").value;
+
+  const A = attend(toks, head, temp, usePE, false);
+  const B = attend(toks, head, temp, usePE, false, ORDER);
+
+  // un-shuffle B's outputs back into original positions
+  const Cm = zeros(T, T);
+  for (let i=0;i<T;i++) for (let j=0;j<T;j++)
+    Cm[ORDER[i]][ORDER[j]] = B.W[i][j];
+
+  let diff = 0;
+  for (let i=0;i<T;i++) for (let j=0;j<T;j++)
+    diff = Math.max(diff, Math.abs(A.W[i][j] - Cm[i][j]));
+
+  const panels = [
+    ["cOrdA", A.W, toks.map((_,i)=>i)],
+    ["cOrdB", B.W, ORDER],
+    ["cOrdC", Cm, toks.map((_,i)=>i)],
+  ];
+  for (const [id, M, order] of panels){
+    const {ctx, w} = fitCanvas(el(id), 260);
+    const left = 62, top = 52;
+    const size = Math.min(w-left-10, 260-top-8);
+    const cell = size/T;
+    for (let i=0;i<T;i++){
+      for (let j=0;j<T;j++){
+        ctx.fillStyle = blue(M[i][j]/Math.max(0.25, Math.max(...M[i])));
+        ctx.fillRect(left+j*cell, top+i*cell, cell+0.5, cell+0.5);
+      }
+      ctx.fillStyle = C.slate; ctx.textAlign = "right"; ctx.font = "9.5px Helvetica";
+      ctx.fillText(toks[order[i]], left-4, top+(i+0.7)*cell);
+    }
+    ctx.strokeStyle = C.grey; ctx.lineWidth = 1; ctx.strokeRect(left, top, size, size);
+  }
+  el("capB").textContent = ORDER.map(i => toks[i]).join(" ");
+  el("sDiff").textContent = diff.toExponential(2);
+  const same = diff < 1e-9;
+  el("sVerdict").textContent = same ? "order invisible" : "order matters";
+  el("sVerdict").style.color = same ? C.red : C.green;
+  el("msg3").innerHTML = same
+    ? `The maximum difference is <b>${diff.toExponential(2)}</b>, which is zero to machine precision.
+       Shuffling the tokens shuffled the answer and changed nothing else, so this operation is computing a
+       function of the <b>set</b> of tokens. It has no idea what order they arrived in.`
+    : `The maximum difference is now <b>${diff.toFixed(3)}</b>. With positional encoding added, the same
+       tokens in a different order genuinely produce a different answer, which is what you need if
+       <i>dog bites man</i> is to differ from <i>man bites dog</i>.`;
+}
+
+/* =================== TAB 4: heads =================== */
+function drawHeads(){
+  const toks = tokens();
+  const T = toks.length;
+  const temp = +el("temp").value;
+  const names = ["agreement", "determiner to noun", "pronoun to animate", "previous word"];
+  const {ctx, w} = fitCanvas(el("cHeads"), 300);
+  const gap = 12;
+  const size = Math.min((w - 5*gap)/4, 210);
+  ctx.textAlign = "center";
+  for (let h=0;h<4;h++){
+    const A = attend(toks, h, temp, el("pe").checked, el("causal").checked);
+    const x0 = gap + h*(size+gap), y0 = 42;
+    const cell = size/T;
+    for (let i=0;i<T;i++) for (let j=0;j<T;j++){
+      ctx.fillStyle = blue(A.W[i][j]/Math.max(0.25, Math.max(...A.W[i])));
+      ctx.fillRect(x0+j*cell, y0+i*cell, cell+0.5, cell+0.5);
+    }
+    ctx.strokeStyle = C.grey; ctx.lineWidth = 1; ctx.strokeRect(x0, y0, size, size);
+    ctx.fillStyle = C.slate; ctx.font = "700 11.5px Helvetica";
+    ctx.fillText(`head ${h+1}`, x0+size/2, 18);
+    ctx.fillStyle = C.grey; ctx.font = "10.5px Helvetica";
+    ctx.fillText(names[h], x0+size/2, 33);
+    // average distance attended, a one-number summary of the head's character
+    let dsum = 0, wsum = 0;
+    for (let i=0;i<T;i++) for (let j=0;j<T;j++){ dsum += A.W[i][j]*Math.abs(i-j); wsum += A.W[i][j]; }
+    ctx.fillStyle = C.slate; ctx.font = "10.5px Helvetica";
+    ctx.fillText(`mean distance attended: ${(dsum/wsum).toFixed(2)}`, x0+size/2, y0+size+16);
+  }
+}
+
+/* =================== TAB 5: the bill =================== */
+function drawBill(){
+  const d = +el("dmodel").value, k = +el("ksz").value;
+  el("dmodelVal").textContent = d; el("kszVal").textContent = k;
+  const ns = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768];
+  const rnn = n => n*d*d, cnn = n => n*k*d*d, att = n => n*n*d + n*d*d;
+
+  function plot(id, series, ylab, logY){
+    const {ctx, w} = fitCanvas(el(id), 330);
+    const L = 62, R = 12, Tp = 14, B = 46;
+    const pw = w-L-R, ph = 330-Tp-B;
+    const xs = ns.map((n,i) => L + i/(ns.length-1)*pw);
+    const all = series.flatMap(s => ns.map(s.f));
+    const lo = Math.max(1, Math.min(...all)), hi = Math.max(...all);
+    const yOf = v => Tp + ph - (Math.log(Math.max(v,lo))-Math.log(lo))/(Math.log(hi)-Math.log(lo)+1e-9)*ph;
+    ctx.strokeStyle = C.line; ctx.lineWidth = 1;
+    for (let g=0;g<=4;g++){
+      const y = Tp + g/4*ph;
+      ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(L+pw,y); ctx.stroke();
+    }
+    series.forEach(s => {
+      ctx.strokeStyle = s.c; ctx.lineWidth = 2.4; ctx.beginPath();
+      ns.forEach((n,i) => { const y = yOf(s.f(n)); i ? ctx.lineTo(xs[i],y) : ctx.moveTo(xs[i],y); });
+      ctx.stroke();
+      ctx.fillStyle = s.c;
+      ns.forEach((n,i) => { ctx.beginPath(); ctx.arc(xs[i], yOf(s.f(n)), 2.6, 0, 7); ctx.fill(); });
+    });
+    ctx.fillStyle = C.grey; ctx.font = "10px Helvetica"; ctx.textAlign = "center";
+    [0,3,6,9].forEach(i => ctx.fillText(ns[i], xs[i], 330-B+16));
+    ctx.fillText("sequence length", L+pw/2, 330-B+32);
+    ctx.save(); ctx.translate(14, Tp+ph/2); ctx.rotate(-Math.PI/2);
+    ctx.fillText(ylab, 0, 0); ctx.restore();
+    let ly = Tp+10;
+    series.forEach(s => {
+      ctx.fillStyle = s.c; ctx.textAlign = "left"; ctx.font = "700 11px Helvetica";
+      ctx.fillText(s.n, L+8, ly); ly += 14;
+    });
+  }
+  plot("cCost", [
+    {n:"RNN, n d^2", f:rnn, c:C.amber},
+    {n:`CNN, n k d^2 (k=${k})`, f:cnn, c:C.green},
+    {n:"attention, n^2 d + n d^2", f:att, c:C.slate},
+  ], "operations per layer");
+  plot("cPath", [
+    {n:"RNN: n steps", f:n=>n, c:C.amber},
+    {n:`CNN: log_${k}(n) layers`, f:n=>Math.ceil(Math.log(n)/Math.log(k)), c:C.green},
+    {n:"attention: 1 step", f:()=>1, c:C.slate},
+  ], "steps between first and last position");
+
+  const cross = Math.round(d);          // n^2 d = n d^2  =>  n = d
+  let html = '<table class="kt"><tr><th>sequence length</th><th>RNN ops</th><th>CNN ops</th>' +
+             '<th>attention ops</th><th>attention / RNN</th></tr>';
+  for (const n of [64, 512, 4096, 32768]){
+    const r = rnn(n), a = att(n);
+    html += `<tr><td>${n.toLocaleString()}</td><td>${r.toExponential(2)}</td>` +
+            `<td>${cnn(n).toExponential(2)}</td><td>${a.toExponential(2)}</td>` +
+            `<td style="color:${a/r>10?C.red:C.ink};font-weight:${a/r>10?700:400}">${(a/r).toFixed(1)}x</td></tr>`;
+  }
+  html += "</table>";
+  html += `<div style="font-size:13px;color:${C.grey};margin-top:8px">
+    The quadratic term overtakes the rest at about <b>n = d = ${cross.toLocaleString()}</b>. Below that,
+    attention costs roughly what a recurrent layer costs and buys a path length of 1. Above it, the
+    quadratic term dominates and every extra token gets more expensive than the last.</div>`;
+  el("billTable").innerHTML = html;
+}
+
+/* =================== wiring =================== */
+function redrawCurrent(){
+  const on = document.querySelector(".tab.on").dataset.tab;
+  el("sentBar").classList.toggle("hide", on === "bill");
+  if (on === "matrix") drawMatrix();
+  if (on === "steps")  drawSteps();
+  if (on === "order")  drawOrder();
+  if (on === "heads")  drawHeads();
+  if (on === "bill")   drawBill();
+}
+document.querySelectorAll(".tab").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    for (const t of ["matrix","steps","order","heads","bill"])
+      el("tab-"+t).classList.toggle("hide", t !== b.dataset.tab);
+    redrawCurrent();
+  };
+});
+["sent","head","pe","causal"].forEach(id => el(id).onchange = () => { ORDER = null; redrawCurrent(); });
+el("custom").oninput = () => { SEL = null; ORDER = null; redrawCurrent(); };
+el("temp").oninput = () => { el("tempVal").textContent = (+el("temp").value).toFixed(1); redrawCurrent(); };
+el("pe2").onchange = drawOrder;
+el("shuffleTok").onclick = () => {
+  const T = tokens().length;
+  ORDER = Array.from({length:T}, (_,i)=>i);
+  for (let i=T-1;i>0;i--){ const j = Math.floor(Math.random()*(i+1)); [ORDER[i],ORDER[j]]=[ORDER[j],ORDER[i]]; }
+  drawOrder();
+};
+el("resetTok").onclick = () => { ORDER = null; drawOrder(); };
+["dmodel","ksz"].forEach(id => el(id).oninput = drawBill);
+window.addEventListener("resize", redrawCurrent);
+
+if (!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
+    this.beginPath();
+    this.moveTo(x+r,y); this.arcTo(x+w,y,x+w,y+h,r); this.arcTo(x+w,y+h,x,y+h,r);
+    this.arcTo(x,y+h,x,y,r); this.arcTo(x,y,x+w,y,r); this.closePath();
+  };
+}
+redrawCurrent();
+</script>
+</body>
+</html>

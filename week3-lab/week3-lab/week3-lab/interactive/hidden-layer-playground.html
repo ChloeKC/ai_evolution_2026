@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<!--
+  Hidden Layer Playground
+  The Evolution of Machine Learning and AI, Week 3
+  South East Technological University
+
+  Watch a network learn, live, and watch the hidden layer bend the space until
+  a straight line works. Single file, no build step, no network. Embed with:
+  <iframe src="hidden-layer-playground.html" width="100%" height="860"
+          style="border:0"></iframe>
+
+  Booklet cross-references: Chapters 10, 14 and 15.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hidden Layer Playground</title>
+<style>
+  :root{
+    --slate:#47546B; --slate-dark:#333F53; --ink:#22293A; --grey:#8A93A5;
+    --amber:#A96E08; --blue:#4E7291; --red:#9E3B2C; --green:#2E7D4F;
+    --key:#EDF0F5; --panel:#F7F9FC;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; padding:18px; color:var(--ink); background:#fff;
+       font:15px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}
+  h1{font-size:20px; margin:0 0 2px; color:var(--slate-dark)}
+  .sub{color:var(--grey); font-size:13px; margin-bottom:14px}
+  .controls{display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;
+    background:var(--panel); border:1px solid #E3E8F0; border-radius:6px;
+    padding:12px 14px; margin-bottom:12px}
+  .ctl{display:flex; flex-direction:column; gap:3px; min-width:150px}
+  .ctl label{font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--grey)}
+  .ctl .val{font-weight:700; color:var(--slate-dark); font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%; accent-color:var(--slate)}
+  select{padding:5px; border:1px solid var(--grey); border-radius:4px; background:#fff; font-size:13.5px}
+  .btns{display:flex; gap:6px}
+  button{padding:7px 13px; border:0; border-radius:5px; cursor:pointer;
+         font-size:13.5px; font-weight:600; color:#fff; background:var(--slate)}
+  button.ghost{background:#fff; color:var(--slate); border:1px solid var(--grey)}
+  .panes{display:grid; grid-template-columns:1.1fr 1fr 1fr; gap:12px}
+  @media(max-width:980px){.panes{grid-template-columns:1fr 1fr}}
+  @media(max-width:660px){.panes{grid-template-columns:1fr}}
+  .card{border:1px solid #E3E8F0; border-radius:6px; padding:8px; background:#fff}
+  .card h2{font-size:11.5px; letter-spacing:.08em; text-transform:uppercase;
+           color:var(--grey); margin:2px 0 2px 4px}
+  .card p.cap{font-size:12px; color:var(--grey); margin:2px 4px 6px}
+  canvas{width:100%; display:block; border-radius:4px}
+  .readout{display:grid; grid-template-columns:repeat(auto-fit,minmax(115px,1fr));
+           gap:10px; margin-top:12px}
+  .stat{background:var(--key); border-radius:5px; padding:9px 11px}
+  .stat .k{font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--grey)}
+  .stat .v{font-size:19px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--slate-dark)}
+  #msg{margin-top:12px; padding:11px 13px; border-radius:5px;
+       border-left:4px solid var(--grey); background:var(--key); font-size:14.5px}
+  .note{margin-top:12px; font-size:13px; color:var(--grey)}
+</style>
+</head>
+<body>
+
+<h1>Hidden Layer Playground</h1>
+<div class="sub">Week 3 &middot; The Evolution of Machine Learning and AI &middot; booklet chapters 10, 14 and 15</div>
+
+<div class="controls">
+  <div class="ctl">
+    <label for="problem">Problem</label>
+    <select id="problem">
+      <option value="xor">XOR (the 1969 wall)</option>
+      <option value="and">AND (a line is enough)</option>
+      <option value="circle">Circle inside a ring</option>
+      <option value="moons">Two moons</option>
+    </select>
+  </div>
+  <div class="ctl">
+    <label for="hidden">Hidden units &mdash; <span class="val" id="hiddenVal">2</span></label>
+    <input type="range" id="hidden" min="0" max="8" step="1" value="2">
+  </div>
+  <div class="ctl">
+    <label for="act">Activation</label>
+    <select id="act">
+      <option value="sigmoid">sigmoid</option>
+      <option value="tanh">tanh</option>
+      <option value="relu">ReLU</option>
+      <option value="linear">none (linear)</option>
+    </select>
+  </div>
+  <div class="ctl">
+    <label for="lr">Learning rate &mdash; <span class="val" id="lrVal">0.500</span></label>
+    <input type="range" id="lr" min="-2.3" max="0.7" step="0.01" value="-0.301">
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>&nbsp;</label>
+    <div class="btns">
+      <button id="play">Train</button>
+      <button id="step100" class="ghost">+100 epochs</button>
+      <button id="reset" class="ghost">Reset</button>
+    </div>
+  </div>
+</div>
+
+<div class="panes">
+  <div class="card">
+    <h2>The network</h2>
+    <p class="cap">Line thickness is weight size. Blue pushes toward 1, red toward 0.</p>
+    <canvas id="net" height="300"></canvas>
+  </div>
+  <div class="card">
+    <h2>Input space</h2>
+    <p class="cap">What the model predicts everywhere, and where the data actually is.</p>
+    <canvas id="input" height="300"></canvas>
+  </div>
+  <div class="card">
+    <h2>Hidden representation</h2>
+    <p class="cap">The same points, plotted in the coordinates the hidden layer invented.</p>
+    <canvas id="hiddenv" height="300"></canvas>
+  </div>
+</div>
+
+<div class="card" style="margin-top:12px">
+  <h2>Loss against epoch</h2>
+  <canvas id="loss" height="150"></canvas>
+</div>
+
+<div class="readout">
+  <div class="stat"><div class="k">Epoch</div><div class="v" id="sEpoch">0</div></div>
+  <div class="stat"><div class="k">Loss</div><div class="v" id="sLoss">0.000</div></div>
+  <div class="stat"><div class="k">Correct</div><div class="v" id="sAcc">0 / 4</div></div>
+  <div class="stat"><div class="k">Parameters</div><div class="v" id="sParams">9</div></div>
+</div>
+
+<div id="msg">Press <b>Train</b>. Then set hidden units to 0 and try XOR again.</div>
+
+<div class="note">
+  Three experiments worth doing. <b>One:</b> XOR with 0 hidden units, which is the 1969 result you can
+  watch fail. <b>Two:</b> XOR with 2 hidden units and activation set to <em>none</em>, which shows that
+  stacked linear layers collapse to a single linear layer. <b>Three:</b> watch the right-hand panel while
+  it trains, and see the two points that should output 1 move on top of each other.
+</div>
+
+<script>
+"use strict";
+
+const C = { slate:"#47546B", grey:"#8A93A5", amber:"#A96E08", blue:"#4E7291",
+            red:"#9E3B2C", green:"#2E7D4F", key:"#EDF0F5" };
+
+/* ---------------- datasets ---------------------------------------- */
+function makeData(kind){
+  if (kind === "xor") return {
+    X:[[0,0],[0,1],[1,0],[1,1]], Y:[0,1,1,0], lo:-0.35, hi:1.35, big:true };
+  if (kind === "and") return {
+    X:[[0,0],[0,1],[1,0],[1,1]], Y:[0,0,0,1], lo:-0.35, hi:1.35, big:true };
+  if (kind === "circle"){
+    const X=[],Y=[]; let s=7;
+    const rnd=()=>{ s=(s*16807)%2147483647; return s/2147483647; };
+    for (let i=0;i<120;i++){
+      const inner=i%2===0, r=inner?0.28*rnd():0.62+0.22*rnd(), a=2*Math.PI*rnd();
+      X.push([0.5+r*Math.cos(a), 0.5+r*Math.sin(a)]); Y.push(inner?1:0);
+    }
+    return {X:X,Y:Y,lo:-0.25,hi:1.25,big:false};
+  }
+  const X=[],Y=[]; let s=11;
+  const rnd=()=>{ s=(s*16807)%2147483647; return s/2147483647; };
+  for (let i=0;i<120;i++){
+    const up=i%2===0, t=Math.PI*rnd();
+    const nx=0.06*(rnd()-0.5), ny=0.06*(rnd()-0.5);
+    if (up) X.push([0.30+0.42*Math.cos(t)+nx, 0.34+0.40*Math.sin(t)+ny]);
+    else    X.push([0.70-0.42*Math.cos(t)+nx, 0.66-0.40*Math.sin(t)+ny]);
+    Y.push(up?1:0);
+  }
+  return {X:X,Y:Y,lo:-0.25,hi:1.25,big:false};
+}
+
+/* ---------------- the network ------------------------------------- */
+const ACT = {
+  sigmoid:{ f:z=>1/(1+Math.exp(-z)), d:a=>a*(1-a) },
+  tanh:   { f:z=>Math.tanh(z),       d:a=>1-a*a },
+  relu:   { f:z=>z>0?z:0,            d:a=>a>0?1:0 },
+  linear: { f:z=>z,                  d:()=>1 }
+};
+
+let data, H = 2, act = "sigmoid", lr = 0.5;
+let W1, b1, W2, b2, epoch = 0, hist = [], playing = false, seed = 1;
+
+function rnd(){ seed = (seed*1103515245 + 12345) & 0x7fffffff; return seed/0x7fffffff; }
+function gauss(sd){ return sd * (rnd()*2 - 1) * 1.7; }
+
+function build(){
+  W1 = []; b1 = []; W2 = []; b2 = 0;
+  for (let j=0;j<H;j++){ W1.push([gauss(1.2), gauss(1.2)]); b1.push(0); W2.push(gauss(1.2)); }
+  if (H === 0) { W2 = [gauss(1.2), gauss(1.2)]; }   // direct 2 -> 1
+  epoch = 0; hist = [];
+}
+
+function forward(x){
+  if (H === 0){
+    const z = W2[0]*x[0] + W2[1]*x[1] + b2;
+    return { a1: [], out: 1/(1+Math.exp(-z)) };
+  }
+  const a1 = new Array(H);
+  for (let j=0;j<H;j++){
+    a1[j] = ACT[act].f(W1[j][0]*x[0] + W1[j][1]*x[1] + b1[j]);
+  }
+  let z2 = b2;
+  for (let j=0;j<H;j++) z2 += W2[j]*a1[j];
+  return { a1: a1, out: 1/(1+Math.exp(-z2)) };
+}
+
+function trainEpoch(){
+  const n = data.X.length;
+  let gW1 = [], gb1 = [], gW2 = [], gb2 = 0, loss = 0;
+  if (H === 0){ gW2 = [0,0]; } else {
+    for (let j=0;j<H;j++){ gW1.push([0,0]); gb1.push(0); gW2.push(0); }
+  }
+  for (let i=0;i<n;i++){
+    const x = data.X[i], y = data.Y[i];
+    const fp = forward(x), o = fp.out;
+    loss += (o - y)*(o - y);
+    const dz2 = 2*(o - y)*o*(1-o)/n;          // through the output sigmoid
+    if (H === 0){
+      gW2[0] += dz2*x[0]; gW2[1] += dz2*x[1]; gb2 += dz2;
+    } else {
+      gb2 += dz2;
+      for (let j=0;j<H;j++){
+        gW2[j] += dz2*fp.a1[j];
+        const dz1 = dz2*W2[j]*ACT[act].d(fp.a1[j]);   // the blame crosses a layer
+        gW1[j][0] += dz1*x[0];
+        gW1[j][1] += dz1*x[1];
+        gb1[j]    += dz1;
+      }
+    }
+  }
+  if (H === 0){
+    W2[0] -= lr*gW2[0]; W2[1] -= lr*gW2[1];
+  } else {
+    for (let j=0;j<H;j++){
+      W1[j][0] -= lr*gW1[j][0]; W1[j][1] -= lr*gW1[j][1];
+      b1[j]    -= lr*gb1[j];    W2[j]    -= lr*gW2[j];
+    }
+  }
+  b2 -= lr*gb2;
+  epoch++;
+  hist.push(loss/n);
+  if (hist.length > 6000) hist.shift();
+  return loss/n;
+}
+
+/* ---------------- drawing helpers --------------------------------- */
+function fit(cv){
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = parseInt(cv.getAttribute("height"),10);
+  cv.width = Math.round(w*dpr); cv.height = Math.round(h*dpr);
+  cv.style.height = h+"px";
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return {ctx:ctx, w:w, h:h};
+}
+const el = id => document.getElementById(id);
+
+function drawNet(){
+  const { ctx, w, h } = fit(el("net"));
+  ctx.clearRect(0,0,w,h);
+  const xIn = 40, xH = w/2, xOut = w-40;
+  const yIn = [h*0.34, h*0.66];
+  const yH = [];
+  const m = Math.max(1,H);
+  for (let j=0;j<H;j++) yH.push(h*0.14 + (h*0.72)*(H===1?0.5:j/(H-1)));
+  const yOut = h/2;
+
+  function edge(x1,y1,x2,y2,wgt){
+    const t = Math.min(1, Math.abs(wgt)/3.2);
+    ctx.strokeStyle = wgt >= 0 ? C.blue : C.red;
+    ctx.globalAlpha = 0.25 + 0.7*t;
+    ctx.lineWidth = 0.6 + 4.4*t;
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  if (H === 0){
+    edge(xIn,yIn[0],xOut,yOut,W2[0]);
+    edge(xIn,yIn[1],xOut,yOut,W2[1]);
+  } else {
+    for (let j=0;j<H;j++){
+      edge(xIn,yIn[0],xH,yH[j],W1[j][0]);
+      edge(xIn,yIn[1],xH,yH[j],W1[j][1]);
+      edge(xH,yH[j],xOut,yOut,W2[j]);
+    }
+  }
+  function node(x,y,label,fill){
+    ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(x,y,14,0,7); ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "#fff"; ctx.font = "bold 11px sans-serif";
+    ctx.textAlign = "center"; ctx.fillText(label,x,y+4); ctx.textAlign = "left";
+  }
+  node(xIn,yIn[0],"x1",C.slate); node(xIn,yIn[1],"x2",C.slate);
+  for (let j=0;j<H;j++) node(xH,yH[j],"h"+(j+1),C.amber);
+  node(xOut,yOut,"y",C.green);
+  ctx.fillStyle = C.grey; ctx.font = "11px sans-serif";
+  if (H === 0) ctx.fillText("no hidden layer", xH-42, h-8);
+}
+
+function drawInput(){
+  const { ctx, w, h } = fit(el("input"));
+  ctx.clearRect(0,0,w,h);
+  const lo = data.lo, hi = data.hi;
+  const X = u => (u-lo)/(hi-lo)*w, Y = u => h - (u-lo)/(hi-lo)*h;
+  const N = 56, cw = w/N, ch = h/N;
+  for (let i=0;i<N;i++) for (let j=0;j<N;j++){
+    const ux = lo + (hi-lo)*(i+0.5)/N, uy = lo + (hi-lo)*(j+0.5)/N;
+    const p = forward([ux,uy]).out;
+    const r = Math.round(237 - 68*p), g = Math.round(240 - 55*p), b = Math.round(245 - 132*p);
+    ctx.fillStyle = "rgb("+r+","+g+","+b+")";
+    ctx.fillRect(i*cw, Y(uy)-ch, cw+1, ch+1);
+  }
+  // the boundary at p = 0.5
+  ctx.strokeStyle = C.red; ctx.lineWidth = 2;
+  for (let i=0;i<N;i++) for (let j=0;j<N;j++){
+    const ux = lo+(hi-lo)*(i+0.5)/N, uy = lo+(hi-lo)*(j+0.5)/N;
+    const p = forward([ux,uy]).out;
+    const px = forward([ux+(hi-lo)/N, uy]).out;
+    const py = forward([ux, uy+(hi-lo)/N]).out;
+    if ((p-0.5)*(px-0.5) < 0 || (p-0.5)*(py-0.5) < 0){
+      ctx.fillStyle = C.red; ctx.fillRect(X(ux)-1, Y(uy)-1, 2.4, 2.4);
+    }
+  }
+  for (let i=0;i<data.X.length;i++){
+    const x = data.X[i];
+    ctx.fillStyle = data.Y[i] === 1 ? C.amber : C.slate;
+    ctx.beginPath(); ctx.arc(X(x[0]), Y(x[1]), data.big ? 9 : 3.6, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = data.big ? 2.4 : 1; ctx.stroke();
+  }
+}
+
+function drawHidden(){
+  const { ctx, w, h } = fit(el("hiddenv"));
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = "#FAFBFD"; ctx.fillRect(0,0,w,h);
+  if (H < 2){
+    ctx.fillStyle = C.grey; ctx.font = "13px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(H === 0 ? "No hidden layer to plot." : "Needs at least 2 hidden units.", w/2, h/2);
+    ctx.fillText(H === 0 ? "The model is a straight line in the input space." : "", w/2, h/2+18);
+    ctx.textAlign = "left";
+    return;
+  }
+  const pts = data.X.map(x => forward(x).a1);
+  let lo = Infinity, hi = -Infinity;
+  for (const p of pts){ lo = Math.min(lo, p[0], p[1]); hi = Math.max(hi, p[0], p[1]); }
+  if (!isFinite(lo) || hi - lo < 1e-6){ lo -= 0.5; hi += 0.5; }
+  const pad = (hi-lo)*0.15; lo -= pad; hi += pad;
+  const X = u => (u-lo)/(hi-lo)*w, Y = u => h - (u-lo)/(hi-lo)*h;
+
+  ctx.strokeStyle = "#E3E8F0"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0,Y(lo)); ctx.lineTo(w,Y(lo)); ctx.stroke();
+
+  // the output layer is a straight line in THIS space: draw it
+  if (Math.abs(W2[1]) > 1e-6){
+    ctx.strokeStyle = C.green; ctx.lineWidth = 2.2; ctx.setLineDash([6,4]);
+    ctx.beginPath();
+    const y1 = -(W2[0]*lo + b2)/W2[1], y2 = -(W2[0]*hi + b2)/W2[1];
+    ctx.moveTo(X(lo), Y(y1)); ctx.lineTo(X(hi), Y(y2));
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+  for (let i=0;i<pts.length;i++){
+    ctx.fillStyle = data.Y[i] === 1 ? C.amber : C.slate;
+    ctx.beginPath(); ctx.arc(X(pts[i][0]), Y(pts[i][1]), data.big ? 9 : 3.6, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = data.big ? 2.4 : 1; ctx.stroke();
+  }
+  ctx.fillStyle = C.grey; ctx.font = "11px sans-serif";
+  ctx.fillText("h1", w-20, h-6); ctx.fillText("h2", 6, 14);
+  ctx.fillStyle = C.green; ctx.font = "bold 11px sans-serif";
+  ctx.fillText("the output layer is this line", 8, h-8);
+}
+
+function drawLoss(){
+  const { ctx, w, h } = fit(el("loss"));
+  ctx.clearRect(0,0,w,h);
+  const pad = {l:48,r:12,t:12,b:24};
+  ctx.strokeStyle = "#D9DFEA"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad.l,h-pad.b); ctx.lineTo(w-pad.r,h-pad.b); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(pad.l,pad.t); ctx.lineTo(pad.l,h-pad.b); ctx.stroke();
+  if (hist.length < 2) return;
+  const safe = hist.map(z => Math.max(z,1e-7));
+  const lo = Math.log10(Math.min.apply(null,safe)), hi = Math.log10(Math.max.apply(null,safe));
+  const span = Math.max(0.5, hi-lo);
+  const X = i => pad.l + i/Math.max(1,hist.length-1)*(w-pad.l-pad.r);
+  const Y = z => h-pad.b - (Math.log10(Math.max(z,1e-7))-lo)/span*(h-pad.t-pad.b);
+  ctx.strokeStyle = C.slate; ctx.lineWidth = 2; ctx.beginPath();
+  for (let i=0;i<hist.length;i++){
+    if (i===0) ctx.moveTo(X(i),Y(hist[i])); else ctx.lineTo(X(i),Y(hist[i]));
+  }
+  ctx.stroke();
+  ctx.fillStyle = C.grey; ctx.font = "10px sans-serif";
+  ctx.fillText("1e"+Math.round(hi), 6, Y(Math.pow(10,hi))+4);
+  ctx.fillText("1e"+Math.round(lo), 6, Y(Math.pow(10,lo))+4);
+}
+
+/* ---------------- messages ---------------------------------------- */
+function message(){
+  const box = el("msg");
+  let t, col, bg;
+  const correct = countCorrect();
+  const n = data.X.length;
+  if (H === 0){
+    t = "<b>No hidden layer.</b> This is a perceptron, and on XOR it will never get all four right, no matter how long you train. That is the 1969 result, and you are watching it happen rather than reading about it.";
+    col = C.red; bg = "#F9E9E4";
+  } else if (act === "linear"){
+    t = "<b>No activation function.</b> Two linear layers multiply out to a single linear layer, so the extra units buy you nothing at all. Depth without a non-linearity is an expensive way to draw a straight line.";
+    col = C.red; bg = "#F9E9E4";
+  } else if (epoch < 30){
+    t = "Training. Watch the right-hand panel: the hidden layer is moving the points into new coordinates.";
+    col = C.grey; bg = C.key;
+  } else if (correct === n){
+    t = "<b>Solved.</b> Look at the right-hand panel. The points that should output 1 have been moved together, and the green line separating them is the output layer. The hidden layer did not add power, it changed the coordinates.";
+    col = C.green; bg = "#E3F2EA";
+  } else if (hist.length > 60 && hist[hist.length-1] > hist[hist.length-50]*0.995){
+    t = "<b>Stalled.</b> The loss has stopped moving. Try a different learning rate, more hidden units, or press Reset for a different random start: where you begin genuinely matters.";
+    col = C.amber; bg = "#FBF1DC";
+  } else {
+    t = "Still learning. " + correct + " of " + n + " correct.";
+    col = C.slate; bg = C.key;
+  }
+  box.style.borderLeftColor = col; box.style.background = bg; box.innerHTML = t;
+}
+
+function countCorrect(){
+  let c = 0;
+  for (let i=0;i<data.X.length;i++){
+    const o = forward(data.X[i]).out;
+    if ((o > 0.5 ? 1 : 0) === data.Y[i]) c++;
+  }
+  return c;
+}
+
+function draw(){
+  drawNet(); drawInput(); drawHidden(); drawLoss();
+  el("sEpoch").textContent = epoch;
+  el("sLoss").textContent  = hist.length ? hist[hist.length-1].toFixed(5) : "0.000";
+  el("sAcc").textContent   = countCorrect() + " / " + data.X.length;
+  el("sParams").textContent = H === 0 ? 3 : (H*3 + 1);
+  message();
+}
+
+/* ---------------- loop and controls -------------------------------- */
+function loop(){
+  if (!playing) return;
+  for (let i=0;i<12;i++) trainEpoch();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function resetAll(){
+  data = makeData(el("problem").value);
+  seed = 1 + Math.floor(Math.random()*1000);
+  build(); draw();
+}
+
+(function init(){
+  el("problem").addEventListener("change", () => { playing=false; el("play").textContent="Train"; resetAll(); });
+  el("hidden").addEventListener("input", e => {
+    H = parseInt(e.target.value,10); el("hiddenVal").textContent = H;
+    playing=false; el("play").textContent="Train"; build(); draw();
+  });
+  el("act").addEventListener("change", e => {
+    act = e.target.value; playing=false; el("play").textContent="Train"; build(); draw();
+  });
+  el("lr").addEventListener("input", e => {
+    lr = Math.pow(10, parseFloat(e.target.value));
+    el("lrVal").textContent = lr.toFixed(3);
+  });
+  el("play").addEventListener("click", () => {
+    playing = !playing; el("play").textContent = playing ? "Pause" : "Train";
+    if (playing) requestAnimationFrame(loop);
+  });
+  el("step100").addEventListener("click", () => { for (let i=0;i<100;i++) trainEpoch(); draw(); });
+  el("reset").addEventListener("click", () => { playing=false; el("play").textContent="Train"; resetAll(); });
+  window.addEventListener("resize", draw);
+  resetAll();
+})();
+</script>
+</body>
+</html>
