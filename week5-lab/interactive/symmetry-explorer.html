@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<!--
+  Symmetry Explorer
+  The Evolution of Machine Learning and AI, Week 5
+  South East Technological University
+
+  Rotate a molecule and watch two things: the raw coordinates change completely,
+  and the pairwise distances do not change at all. That is the whole of
+  equivariant and geometric deep learning in one gesture.
+
+  Everything is computed live from the actual geometry. The "coordinate model"
+  is a real network with fixed random weights, so its non-invariance is genuine
+  rather than staged.
+
+  Single file, offline. Booklet cross-references: Chapters 14 and 15.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Symmetry Explorer</title>
+<style>
+  :root{--slate:#47546B;--slate-dark:#333F53;--ink:#22293A;--grey:#8A93A5;--amber:#A96E08;
+        --blue:#4E7291;--red:#9E3B2C;--green:#2E7D4F;--key:#EDF0F5;--panel:#F7F9FC;--line:#E3E8F0;}
+  *{box-sizing:border-box}
+  body{margin:0;padding:18px;color:var(--ink);background:#fff;
+       font:15px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}
+  h1{font-size:20px;margin:0 0 2px;color:var(--slate-dark)}
+  .sub{color:var(--grey);font-size:13px;margin-bottom:14px}
+  .tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid var(--line)}
+  .tab{padding:8px 14px;cursor:pointer;font-size:14px;font-weight:600;color:var(--grey);
+       border:0;background:none;border-bottom:3px solid transparent}
+  .tab.on{color:var(--slate-dark);border-bottom-color:var(--amber)}
+  .controls{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;background:var(--panel);
+    border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-bottom:12px}
+  .ctl{display:flex;flex-direction:column;gap:3px;min-width:150px}
+  .ctl label{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--grey)}
+  .ctl .val{font-weight:700;color:var(--slate-dark);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--slate)}
+  select{padding:5px;border:1px solid var(--grey);border-radius:4px;background:#fff;font-size:13.5px}
+  button{padding:7px 13px;border:0;border-radius:5px;cursor:pointer;font-size:13.5px;
+         font-weight:600;color:#fff;background:var(--slate)}
+  button.ghost{background:#fff;color:var(--slate);border:1px solid var(--grey)}
+  .card{border:1px solid var(--line);border-radius:6px;padding:9px;background:#fff;margin-bottom:12px}
+  .card h2{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--grey);margin:2px 0 3px 3px}
+  .card p.cap{font-size:12px;color:var(--grey);margin:2px 3px 7px}
+  canvas{width:100%;display:block;border-radius:4px}
+  .panes{display:grid;gap:12px}
+  .p2{grid-template-columns:1fr 1fr}
+  @media(max-width:900px){.p2{grid-template-columns:1fr}}
+  .readout{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:10px;margin-top:4px}
+  .stat{background:var(--key);border-radius:5px;padding:9px 11px}
+  .stat .k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--grey)}
+  .stat .v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--slate-dark)}
+  .msg{margin-top:10px;padding:11px 13px;border-radius:5px;border-left:4px solid var(--slate);
+       background:var(--key);font-size:14.5px}
+  .note{margin-top:12px;font-size:13px;color:var(--grey)}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;background:var(--panel);
+        border:1px solid var(--line);border-radius:5px;padding:9px 10px;color:var(--slate-dark);white-space:pre}
+  .hide{display:none}
+</style>
+</head>
+<body>
+
+<h1>Symmetry Explorer</h1>
+<div class="sub">Week 5 &middot; The Evolution of Machine Learning and AI &middot; booklet chapters 14 and 15</div>
+
+<div class="tabs">
+  <button class="tab on" data-tab="rot">1. Rotate the molecule</button>
+  <button class="tab" data-tab="sweep">2. A full turn</button>
+  <button class="tab" data-tab="cost">3. What symmetry costs and buys</button>
+</div>
+
+<!-- ============ TAB 1 ============ -->
+<div id="tab-rot">
+<div class="controls">
+  <div class="ctl">
+    <label for="theta">Rotation &ndash; <span class="val" id="thetaVal">0&deg;</span></label>
+    <input type="range" id="theta" min="0" max="360" step="1" value="0">
+  </div>
+  <div class="ctl">
+    <label for="tx">Translation x &ndash; <span class="val" id="txVal">0.0</span></label>
+    <input type="range" id="tx" min="-1.5" max="1.5" step="0.05" value="0">
+  </div>
+  <div class="ctl">
+    <label for="shape">Arrangement</label>
+    <select id="shape">
+      <option value="0">triangle</option>
+      <option value="1">stretched</option>
+      <option value="2">nearly collinear</option>
+    </select>
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>&nbsp;</label>
+    <div style="display:flex;gap:6px"><button id="spin">Spin</button>
+      <button id="zero" class="ghost">Reset</button></div>
+  </div>
+</div>
+<div class="panes p2">
+  <div class="card">
+    <h2>The arrangement</h2>
+    <p class="cap">Three particles. Drag the rotation slider and watch the picture turn.</p>
+    <canvas id="cMol" height="330"></canvas>
+  </div>
+  <div class="card">
+    <h2>What each model actually reads</h2>
+    <p class="cap">Top: the six raw coordinates. Bottom: the three pairwise distances.</p>
+    <canvas id="cFeat" height="330"></canvas>
+  </div>
+</div>
+<div class="readout">
+  <div class="stat"><div class="k">True energy</div><div class="v" id="sTrue">-</div></div>
+  <div class="stat"><div class="k">Coordinate model says</div><div class="v" id="sCoord">-</div></div>
+  <div class="stat"><div class="k">Invariant model says</div><div class="v" id="sInv">-</div></div>
+  <div class="stat"><div class="k">Coordinate drift</div><div class="v" id="sDrift">-</div></div>
+  <div class="stat"><div class="k">Invariant drift</div><div class="v" id="sIdrift">-</div></div>
+</div>
+<div class="msg" id="msg1"></div>
+<div class="note">
+  <b>Worth doing.</b> Press <b>Spin</b> and watch the two "says" numbers. One of them moves and one of them
+  does not, and the one that does not is not being careful or well trained: it is reading a quantity that
+  the rotation cannot change. Then drag the <b>translation</b> slider and watch the same thing happen for a
+  different symmetry. A distance does not care where the pair is, only how far apart they are.
+</div>
+</div>
+
+<!-- ============ TAB 2 ============ -->
+<div id="tab-sweep" class="hide">
+<div class="card">
+  <h2>Predicted energy through a full rotation</h2>
+  <p class="cap">The truth is a horizontal line, because rotating a molecule cannot change its energy.
+  Anything that is not a horizontal line is an error the model did not have to make.</p>
+  <canvas id="cSweep" height="380"></canvas>
+</div>
+<div class="readout">
+  <div class="stat"><div class="k">Coordinate model, spread</div><div class="v" id="sSp1">-</div></div>
+  <div class="stat"><div class="k">Invariant model, spread</div><div class="v" id="sSp2">-</div></div>
+  <div class="stat"><div class="k">Ratio</div><div class="v" id="sSp3">-</div></div>
+</div>
+<div class="msg">The invariant model's line is flat to machine precision, roughly 1e-16. That is not a very
+small error; it is the same number computed twice. The Python lab measures the identical thing on a
+<b>trained</b> model and gets 8.88e-16 against 1.76e-01 for the coordinate model.</div>
+</div>
+
+<!-- ============ TAB 3 ============ -->
+<div id="tab-cost" class="hide">
+<div class="controls">
+  <div class="ctl">
+    <label for="np">Particles &ndash; <span class="val" id="npVal">3</span></label>
+    <input type="range" id="np" min="2" max="12" step="1" value="3">
+  </div>
+  <div class="ctl">
+    <label for="gravity">Add a gravity term &ndash; <span class="val" id="gravityVal">0.0</span></label>
+    <input type="range" id="gravity" min="0" max="1" step="0.05" value="0">
+  </div>
+</div>
+<div class="panes p2">
+  <div class="card">
+    <h2>How much of the input space the symmetry removes</h2>
+    <p class="cap">Rotations and translations are directions in the input that carry no information.</p>
+    <canvas id="cCount" height="300"></canvas>
+  </div>
+  <div class="card">
+    <h2>When the symmetry is false</h2>
+    <div class="mono" id="gravBox"></div>
+    <div class="msg" style="margin-top:10px" id="msg3"></div>
+  </div>
+</div>
+<div class="note">
+  <b>The honest half.</b> A symmetry is a promise about the world. Add a gravity term and the energy really
+  does depend on which way up the arrangement sits, so an invariant model has thrown away the very
+  information it needs, and no dataset can give it back. The Python lab measures this too: with a gravity
+  term the invariant model scores 0.236 against the coordinate model's 0.093. A false constraint is not a
+  handicap, it is a wall.
+</div>
+</div>
+
+<script>
+"use strict";
+const C={slate:"#47546B",grey:"#8A93A5",amber:"#A96E08",blue:"#4E7291",red:"#9E3B2C",
+         green:"#2E7D4F",key:"#EDF0F5",line:"#E3E8F0"};
+const el=id=>document.getElementById(id);
+
+const SHAPES=[
+  [[1.0,0.0],[-0.5,0.95],[-0.55,-0.9]],
+  [[1.5,0.1],[-0.2,0.7],[-1.2,-0.6]],
+  [[1.3,0.05],[0.0,0.0],[-1.25,-0.1]],
+];
+
+function morse(r){return Math.exp(-2*(r-1))-2*Math.exp(-(r-1));}
+function energy(pts){let e=0;
+  for(let i=0;i<pts.length;i++)for(let j=i+1;j<pts.length;j++){
+    const dx=pts[i][0]-pts[j][0],dy=pts[i][1]-pts[j][1];
+    e+=morse(Math.max(0.35,Math.hypot(dx,dy)));}
+  return e;}
+function dists(pts){const d=[];
+  for(let i=0;i<pts.length;i++)for(let j=i+1;j<pts.length;j++)
+    d.push(Math.hypot(pts[i][0]-pts[j][0],pts[i][1]-pts[j][1]));
+  return d.sort((a,b)=>a-b);}
+function transform(pts,theta,tx){
+  const c=Math.cos(theta),s=Math.sin(theta);
+  return pts.map(p=>[c*p[0]-s*p[1]+tx, s*p[0]+c*p[1]]);}
+
+/* A real network with fixed random weights. Its non-invariance is genuine:
+   nothing here is staged to make a point. */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function makeNet(nIn,hidden,seed){
+  const r=mulberry32(seed),L=[[nIn,hidden],[hidden,hidden],[hidden,1]],Ws=[],bs=[];
+  for(const [i,o] of L){const lim=Math.sqrt(6/(i+o)),W=[];
+    for(let a=0;a<i;a++){const row=[];for(let b=0;b<o;b++)row.push((r()*2-1)*lim);W.push(row);}
+    Ws.push(W);bs.push(new Array(o).fill(0).map(()=>(r()*2-1)*0.1));}
+  return {Ws,bs};}
+function runNet(net,x){
+  let a=x.slice();
+  for(let l=0;l<net.Ws.length;l++){
+    const W=net.Ws[l],b=net.bs[l],out=new Array(b.length).fill(0);
+    for(let j=0;j<b.length;j++){let s=b[j];
+      for(let i=0;i<a.length;i++)s+=a[i]*W[i][j];
+      out[j]=(l<net.Ws.length-1)?Math.tanh(s):s;}
+    a=out;}
+  return a[0];}
+
+const NET_COORD=makeNet(6,20,3), NET_INV=makeNet(3,20,4);
+function predCoord(pts){return runNet(NET_COORD,pts.flat());}
+function predInv(pts){return runNet(NET_INV,dists(pts));}
+
+function fit(cv,h){const w=cv.parentElement.clientWidth-20,dpr=devicePixelRatio||1;
+  cv.width=Math.max(120,Math.round(w*dpr));cv.height=Math.round(h*dpr);cv.style.height=h+"px";
+  const x=cv.getContext("2d");x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);return {x,w,h};}
+
+/* ============ TAB 1 ============ */
+let spinTimer=null;
+function drawMol(){
+  const th=+el("theta").value*Math.PI/180, tx=+el("tx").value;
+  const base=SHAPES[+el("shape").value];
+  const pts=transform(base,th,tx);
+  {
+    const {x,w,h}=fit(el("cMol"),330);
+    const cx=w/2,cy=h/2,S=Math.min(w,h)/6.2;
+    x.strokeStyle=C.line;x.lineWidth=1;
+    for(let g=-3;g<=3;g++){
+      x.beginPath();x.moveTo(cx+g*S,10);x.lineTo(cx+g*S,h-10);x.stroke();
+      x.beginPath();x.moveTo(10,cy+g*S);x.lineTo(w-10,cy+g*S);x.stroke();}
+    x.strokeStyle=C.grey;x.lineWidth=1.4;
+    x.beginPath();x.moveTo(10,cy);x.lineTo(w-10,cy);x.stroke();
+    x.beginPath();x.moveTo(cx,10);x.lineTo(cx,h-10);x.stroke();
+    // bonds
+    for(let i=0;i<3;i++)for(let j=i+1;j<3;j++){
+      x.strokeStyle=C.amber;x.lineWidth=2.4;x.beginPath();
+      x.moveTo(cx+pts[i][0]*S,cy-pts[i][1]*S);
+      x.lineTo(cx+pts[j][0]*S,cy-pts[j][1]*S);x.stroke();
+      const mx=cx+(pts[i][0]+pts[j][0])/2*S,my=cy-(pts[i][1]+pts[j][1])/2*S;
+      const d=Math.hypot(pts[i][0]-pts[j][0],pts[i][1]-pts[j][1]);
+      x.fillStyle=C.amber;x.font="700 11px Helvetica";x.textAlign="center";
+      x.fillText(d.toFixed(3),mx,my-5);}
+    const cols=[C.slate,C.blue,C.green];
+    pts.forEach((p,i)=>{x.fillStyle=cols[i];x.beginPath();
+      x.arc(cx+p[0]*S,cy-p[1]*S,10,0,7);x.fill();
+      x.fillStyle="#fff";x.font="700 11px Helvetica";x.textAlign="center";
+      x.fillText(String(i+1),cx+p[0]*S,cy-p[1]*S+4);});
+  }
+  {
+    const {x,w,h}=fit(el("cFeat"),330);
+    const coords=pts.flat(), ds=dists(pts);
+    x.font="700 12px Helvetica";x.textAlign="left";
+    x.fillStyle=C.red;x.fillText("raw coordinates: these all change",12,20);
+    const bw=(w-30)/6;
+    coords.forEach((v,i)=>{
+      const y0=90, hgt=v/2.6*52;
+      x.fillStyle=C.red;
+      x.fillRect(16+i*bw+3,y0-Math.max(hgt,0),bw-6,Math.abs(hgt));
+      if(hgt<0)x.fillRect(16+i*bw+3,y0,bw-6,-hgt);
+      x.fillStyle=C.slate;x.font="10px Helvetica";x.textAlign="center";
+      x.fillText(v.toFixed(2),16+i*bw+bw/2,y0+16);
+      x.fillStyle=C.grey;
+      x.fillText(["x1","y1","x2","y2","x3","y3"][i],16+i*bw+bw/2,y0+30);});
+    x.strokeStyle=C.line;x.beginPath();x.moveTo(16,90);x.lineTo(w-14,90);x.stroke();
+
+    x.font="700 12px Helvetica";x.textAlign="left";
+    x.fillStyle=C.green;x.fillText("pairwise distances: these do not",12,175);
+    const bw2=(w-30)/3;
+    ds.forEach((v,i)=>{
+      const y0=270, hgt=v/2.8*66;
+      x.fillStyle=C.green;x.fillRect(16+i*bw2+8,y0-hgt,bw2-16,hgt);
+      x.fillStyle=C.slate;x.font="700 12px Helvetica";x.textAlign="center";
+      x.fillText(v.toFixed(4),16+i*bw2+bw2/2,y0-hgt-6);
+      x.fillStyle=C.grey;x.font="10px Helvetica";
+      x.fillText("d"+(i+1),16+i*bw2+bw2/2,y0+14);});
+    x.strokeStyle=C.line;x.beginPath();x.moveTo(16,270);x.lineTo(w-14,270);x.stroke();
+  }
+  // readouts
+  const ref=transform(base,0,0);
+  const tEnergy=energy(pts);
+  const pc=predCoord(pts), pi=predInv(pts);
+  const pc0=predCoord(ref), pi0=predInv(ref);
+  el("sTrue").textContent=tEnergy.toFixed(6);
+  el("sCoord").textContent=pc.toFixed(6);
+  el("sInv").textContent=pi.toFixed(6);
+  const d1=Math.abs(pc-pc0), d2=Math.abs(pi-pi0);
+  el("sDrift").textContent=d1.toExponential(2);
+  el("sDrift").style.color=d1>1e-6?C.red:C.green;
+  el("sIdrift").textContent=d2.toExponential(2);
+  el("sIdrift").style.color=d2>1e-6?C.red:C.green;
+  el("msg1").innerHTML=
+   `The true energy is <b>${tEnergy.toFixed(6)}</b> and it does not move, because energy depends only on
+    distances. The coordinate model has drifted <b>${d1.toExponential(2)}</b> from where it started; the
+    invariant model has drifted <b>${d2.toExponential(2)}</b>, which is zero to machine precision.
+    Neither model was trained. The difference is entirely in what they read.`;
+}
+
+/* ============ TAB 2 ============ */
+function drawSweep(){
+  const base=SHAPES[+el("shape").value];
+  const n=240,th=[],pc=[],pi=[],tr=[];
+  for(let i=0;i<n;i++){const t=2*Math.PI*i/(n-1);
+    const p=transform(base,t,0);
+    th.push(t);pc.push(predCoord(p));pi.push(predInv(p));tr.push(energy(p));}
+  const {x,w,h}=fit(el("cSweep"),380);
+  const L=62,R=14,Tp=16,B=40,pw=w-L-R,ph=h-Tp-B;
+  const all=pc.concat(pi).concat(tr);
+  let lo=Math.min(...all),hi=Math.max(...all);
+  const pad=(hi-lo)*0.15||1; lo-=pad;hi+=pad;
+  const X=i=>L+i/(n-1)*pw, Y=v=>Tp+ph-(v-lo)/(hi-lo)*ph;
+  x.strokeStyle=C.line;
+  for(let g=0;g<=4;g++){const yy=Tp+g/4*ph;x.beginPath();x.moveTo(L,yy);x.lineTo(L+pw,yy);x.stroke();
+    x.fillStyle=C.grey;x.font="10px Helvetica";x.textAlign="right";
+    x.fillText((hi-(hi-lo)*g/4).toFixed(2),L-5,yy+3);}
+  function line(arr,col,dash,wid){x.strokeStyle=col;x.lineWidth=wid;x.setLineDash(dash);
+    x.beginPath();arr.forEach((v,i)=>i?x.lineTo(X(i),Y(v)):x.moveTo(X(i),Y(v)));x.stroke();x.setLineDash([]);}
+  line(tr,C.grey,[],3.4); line(pc,C.red,[],2.2); line(pi,C.green,[6,4],2.4);
+  x.fillStyle=C.grey;x.font="700 11.5px Helvetica";x.textAlign="left";
+  x.fillText("the truth: flat, because rotation cannot change energy",L+8,Tp+14);
+  x.fillStyle=C.red;x.fillText("coordinate model",L+8,Tp+30);
+  x.fillStyle=C.green;x.fillText("invariant model: also flat, exactly",L+8,Tp+46);
+  x.fillStyle=C.grey;x.font="10.5px Helvetica";x.textAlign="center";
+  [0,90,180,270,360].forEach(d=>x.fillText(d+"\u00B0",L+d/360*pw,h-B+18));
+  x.fillText("rotation applied to the whole arrangement",L+pw/2,h-B+33);
+  const sp=a=>Math.max(...a)-Math.min(...a);
+  el("sSp1").textContent=sp(pc).toExponential(2);
+  el("sSp2").textContent=sp(pi).toExponential(2);
+  el("sSp3").textContent=(sp(pc)/Math.max(sp(pi),1e-18)).toExponential(1)+"x";
+  el("sSp1").style.color=C.red; el("sSp2").style.color=C.green;
+}
+
+/* ============ TAB 3 ============ */
+function drawCost(){
+  const n=+el("np").value, g=+el("gravity").value;
+  el("npVal").textContent=n; el("gravityVal").textContent=g.toFixed(2);
+  const raw=2*n, pairs=n*(n-1)/2, free=2*n-3;   // minus 2 translations and 1 rotation
+  const {x,w,h}=fit(el("cCount"),300);
+  const rows=[["raw coordinates",raw,C.red],
+              ["genuinely free parameters",Math.max(free,1),C.amber],
+              ["pairwise distances",pairs,C.green]];
+  const mx=Math.max(raw,pairs,free,1);
+  x.font="12px Helvetica";
+  rows.forEach((r,i)=>{
+    const y=54+i*72;
+    x.fillStyle=C.slate;x.textAlign="left";x.font="700 12.5px Helvetica";
+    x.fillText(r[0],16,y-10);
+    x.fillStyle=r[2];x.fillRect(16,y,(w-70)*r[1]/mx,26);
+    x.fillStyle=C.slate;x.font="700 13px Helvetica";
+    x.fillText(String(r[1]),16+(w-70)*r[1]/mx+8,y+18);});
+  x.fillStyle=C.grey;x.font="11px Helvetica";x.textAlign="left";
+  x.fillText("Three of the raw numbers describe only where the arrangement sits",16,272);
+  x.fillText("and which way it faces, and nothing about the arrangement itself.",16,288);
+
+  el("gravBox").textContent=
+`energy without gravity
+    E = sum over pairs of V(distance)
+    invariant under rotation:  YES
+
+energy with a gravity term (strength ${g.toFixed(2)})
+    E = sum over pairs of V(distance)
+        + ${g.toFixed(2)} * (sum of heights)
+    invariant under rotation:  ${g>0?"NO":"YES"}
+
+an invariant model can represent this
+    ${g>0?"NO, at any dataset size":"YES"}`;
+  el("msg3").innerHTML = g>0
+    ? `With gravity switched on, rotating the arrangement <b>does</b> change the energy, so the invariant
+       model is now structurally unable to represent the truth. It discarded the heights, and no amount of
+       data brings them back.`
+    : `With no gravity term the symmetry genuinely holds, so imposing it costs nothing and buys everything:
+       fewer inputs, fewer parameters, and an exact guarantee.`;
+}
+
+/* ============ wiring ============ */
+document.querySelectorAll(".tab").forEach(b=>{b.onclick=()=>{
+  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("on"));
+  b.classList.add("on");
+  for(const t of ["rot","sweep","cost"]) el("tab-"+t).classList.toggle("hide",t!==b.dataset.tab);
+  if(b.dataset.tab==="rot")drawMol();
+  if(b.dataset.tab==="sweep")drawSweep();
+  if(b.dataset.tab==="cost")drawCost();};});
+el("theta").oninput=()=>{el("thetaVal").textContent=el("theta").value+"\u00B0";drawMol();};
+el("tx").oninput=()=>{el("txVal").textContent=(+el("tx").value).toFixed(1);drawMol();};
+el("shape").onchange=()=>{drawMol();};
+el("zero").onclick=()=>{el("theta").value=0;el("tx").value=0;
+  el("thetaVal").textContent="0\u00B0";el("txVal").textContent="0.0";drawMol();};
+el("spin").onclick=()=>{
+  if(spinTimer){clearInterval(spinTimer);spinTimer=null;el("spin").textContent="Spin";return;}
+  el("spin").textContent="Stop";
+  spinTimer=setInterval(()=>{
+    el("theta").value=(+el("theta").value+2)%360;
+    el("thetaVal").textContent=el("theta").value+"\u00B0";drawMol();},40);};
+["np","gravity"].forEach(id=>el(id).oninput=drawCost);
+addEventListener("resize",()=>{drawMol();});
+drawMol();
+</script>
+</body>
+</html>

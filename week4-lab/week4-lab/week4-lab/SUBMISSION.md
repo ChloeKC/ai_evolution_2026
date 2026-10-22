@@ -1,6 +1,6 @@
 # Week 4 Lab: Submission
 
-**Name:** A. Student   **Student number:** 20000000
+**Name:** Chloe Croydon   **Student number:** 20119102
 
 > This sheet is already filled in with the answers from the reference run. Run each
 > notebook cell, find the number where it says to look, and change anything that differs

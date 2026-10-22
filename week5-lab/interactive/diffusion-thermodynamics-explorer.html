@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<!--
+  Diffusion and Thermodynamics Explorer
+  The Evolution of Machine Learning and AI, Week 5
+  South East Technological University
+
+  A diffusion model, run forwards and backwards, live.
+
+  ONE HONEST NOTE ABOUT WHAT IS AND IS NOT LEARNED HERE. In a real diffusion
+  model a network learns the score, which is the gradient of the log density. On
+  this page the data distribution is a mixture of Gaussians, and for that family
+  the score of the noised distribution can be written down EXACTLY. So this page
+  uses the exact score rather than a trained approximation.
+
+  That is a deliberate choice, not a shortcut. It lets you see the reverse
+  process as it would be with a perfect denoiser, which separates two questions
+  that are usually tangled together: what the method does, and how well a network
+  can approximate it. The Python lab (week5-lab/diffusion.py) does the other half
+  by training a real denoiser on data with no closed form.
+
+  Single file, offline. Booklet cross-references: Chapters 20 and 21.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diffusion and Thermodynamics Explorer</title>
+<style>
+  :root{--slate:#47546B;--slate-dark:#333F53;--ink:#22293A;--grey:#8A93A5;--amber:#A96E08;
+        --blue:#4E7291;--red:#9E3B2C;--green:#2E7D4F;--purple:#5B4B9E;
+        --key:#EDF0F5;--panel:#F7F9FC;--line:#E3E8F0;}
+  *{box-sizing:border-box}
+  body{margin:0;padding:18px;color:var(--ink);background:#fff;
+       font:15px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}
+  h1{font-size:20px;margin:0 0 2px;color:var(--slate-dark)}
+  .sub{color:var(--grey);font-size:13px;margin-bottom:14px}
+  .tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid var(--line)}
+  .tab{padding:8px 14px;cursor:pointer;font-size:14px;font-weight:600;color:var(--grey);
+       border:0;background:none;border-bottom:3px solid transparent}
+  .tab.on{color:var(--slate-dark);border-bottom-color:var(--amber)}
+  .controls{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;background:var(--panel);
+    border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-bottom:12px}
+  .ctl{display:flex;flex-direction:column;gap:3px;min-width:150px}
+  .ctl label{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--grey)}
+  .ctl .val{font-weight:700;color:var(--slate-dark);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--slate)}
+  select{padding:5px;border:1px solid var(--grey);border-radius:4px;background:#fff;font-size:13.5px}
+  button{padding:7px 13px;border:0;border-radius:5px;cursor:pointer;font-size:13.5px;
+         font-weight:600;color:#fff;background:var(--slate)}
+  button.ghost{background:#fff;color:var(--slate);border:1px solid var(--grey)}
+  label.chk{display:flex;gap:6px;align-items:center;font-size:13.5px;text-transform:none;letter-spacing:0}
+  .card{border:1px solid var(--line);border-radius:6px;padding:9px;background:#fff;margin-bottom:12px}
+  .card h2{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--grey);margin:2px 0 3px 3px}
+  .card p.cap{font-size:12px;color:var(--grey);margin:2px 3px 7px}
+  canvas{width:100%;display:block;border-radius:4px}
+  .panes{display:grid;gap:12px}
+  .p2{grid-template-columns:1.3fr 1fr}
+  @media(max-width:900px){.p2{grid-template-columns:1fr}}
+  .readout{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:4px}
+  .stat{background:var(--key);border-radius:5px;padding:9px 11px}
+  .stat .k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--grey)}
+  .stat .v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--slate-dark)}
+  .msg{margin-top:10px;padding:11px 13px;border-radius:5px;border-left:4px solid var(--slate);
+       background:var(--key);font-size:14.5px}
+  .note{margin-top:12px;font-size:13px;color:var(--grey)}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;background:var(--panel);
+        border:1px solid var(--line);border-radius:5px;padding:9px 10px;color:var(--slate-dark);white-space:pre}
+  .hide{display:none}
+</style>
+</head>
+<body>
+
+<h1>Diffusion and Thermodynamics Explorer</h1>
+<div class="sub">Week 5 &middot; The Evolution of Machine Learning and AI &middot; booklet chapters 20 and 21</div>
+
+<div class="tabs">
+  <button class="tab on" data-tab="fwd">1. Forwards, into equilibrium</button>
+  <button class="tab" data-tab="rev">2. Backwards, out of noise</button>
+  <button class="tab" data-tab="score">3. The score, and why it is physics</button>
+</div>
+
+<!-- ============ TAB 1 ============ -->
+<div id="tab-fwd">
+<div class="controls">
+  <div class="ctl">
+    <label for="step">Diffusion step &ndash; <span class="val" id="stepVal">0</span> of 200</label>
+    <input type="range" id="step" min="0" max="200" step="1" value="0">
+  </div>
+  <div class="ctl">
+    <label for="shape">The data</label>
+    <select id="shape">
+      <option value="moons">two crescents</option>
+      <option value="ring">a ring</option>
+      <option value="four">four blobs</option>
+    </select>
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>&nbsp;</label>
+    <div style="display:flex;gap:6px"><button id="play">Run forwards</button>
+      <button id="rewind" class="ghost">Back to step 0</button></div>
+  </div>
+</div>
+<div class="panes p2">
+  <div class="card">
+    <h2>The sample cloud</h2>
+    <p class="cap">Every point is being pushed about at random, exactly as ink spreads through water.</p>
+    <canvas id="cFwd" height="360"></canvas>
+  </div>
+  <div class="card">
+    <h2>How much structure is left</h2>
+    <canvas id="cSig" height="180"></canvas>
+    <div class="mono" id="fwdMath" style="margin-top:8px"></div>
+  </div>
+</div>
+<div class="readout">
+  <div class="stat"><div class="k">Signal surviving</div><div class="v" id="sSig">100%</div></div>
+  <div class="stat"><div class="k">Noise added</div><div class="v" id="sNoise">0%</div></div>
+  <div class="stat"><div class="k">Distance to equilibrium</div><div class="v" id="sEq">-</div></div>
+  <div class="stat"><div class="k">State</div><div class="v" id="sState" style="font-size:14px">the data</div></div>
+</div>
+<div class="msg" id="msg1">Nothing on this tab is learned. The forward process is <b>given</b>, from physics,
+and it is the piece of the problem nobody had to fit. That is what makes the remaining learning easy.</div>
+<div class="note">
+  <b>The physical picture.</b> A drop of ink in water. Molecular collisions push it about at random, sharp
+  structure dissolves, and eventually the glass is uniform. That final state is <b>equilibrium</b>, and it
+  has forgotten where the drop was. Run the slider to 200 and you have destroyed the dataset. The clever
+  part is that each individual step added only a little noise, so each individual step is nearly reversible.
+</div>
+</div>
+
+<!-- ============ TAB 2 ============ -->
+<div id="tab-rev" class="hide">
+<div class="controls">
+  <div class="ctl">
+    <label for="rsteps">Reverse steps &ndash; <span class="val" id="rstepsVal">200</span></label>
+    <input type="range" id="rsteps" min="5" max="200" step="5" value="200">
+  </div>
+  <div class="ctl">
+    <label for="temp">Noise put back each step &ndash; <span class="val" id="tempVal">1.00</span></label>
+    <input type="range" id="temp" min="0" max="1.4" step="0.05" value="1">
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>&nbsp;</label>
+    <div style="display:flex;gap:6px"><button id="gen">Generate</button>
+      <button id="anim" class="ghost">Animate</button></div>
+  </div>
+</div>
+<div class="card">
+  <h2>Starting from pure noise, denoising repeatedly</h2>
+  <p class="cap">The same diffusion, run backwards. Grey is the real data for comparison.</p>
+  <canvas id="cRev" height="380"></canvas>
+</div>
+<div class="readout">
+  <div class="stat"><div class="k">Reverse step</div><div class="v" id="sRstep">-</div></div>
+  <div class="stat"><div class="k">Energy distance to data</div><div class="v" id="sED">-</div></div>
+  <div class="stat"><div class="k">Two real samples score</div><div class="v" id="sFloor">-</div></div>
+  <div class="stat"><div class="k">Times the floor</div><div class="v" id="sTimes">-</div></div>
+</div>
+<div class="msg" id="msg2">Drop the reverse steps to 5 and generate. The samples are blurred, because each
+step now has to undo far more than it can. That is the trade at the heart of every diffusion model: quality
+against the number of network calls, and it is why fast samplers are their own research area.</div>
+<div class="note">
+  <b>Why noise is added back on the way out.</b> Setting the last slider to 0 makes every point run
+  downhill to the nearest peak of the density, and the cloud collapses onto a few spots. The injected
+  noise is what keeps the samples spread across the distribution instead of piling up at its modes. It is
+  the same reason a physical system at finite temperature explores its state space rather than freezing
+  into one configuration.
+</div>
+</div>
+
+<!-- ============ TAB 3 ============ -->
+<div id="tab-score" class="hide">
+<div class="controls">
+  <div class="ctl">
+    <label for="sstep">At diffusion step &ndash; <span class="val" id="sstepVal">50</span></label>
+    <input type="range" id="sstep" min="0" max="199" step="1" value="50">
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>Show</label>
+    <label class="chk"><input type="checkbox" id="showdata" checked> the data underneath</label>
+  </div>
+</div>
+<div class="panes p2">
+  <div class="card">
+    <h2>Which way is "towards the data"?</h2>
+    <p class="cap">Each arrow is the score: the direction in which the density increases fastest.</p>
+    <canvas id="cScore" height="420"></canvas>
+  </div>
+  <div class="card">
+    <h2>The vocabulary this borrows</h2>
+    <div class="mono" id="scoreMath"></div>
+    <div class="msg" style="margin-top:10px">The reverse of a diffusion needs the gradient of the log
+    density. That is <b>Langevin dynamics</b>, which physicists have used to sample from Boltzmann
+    distributions since long before machine learning existed. The forward process obeys the
+    <b>Fokker-Planck</b> equation. None of this vocabulary was invented here.</div>
+  </div>
+</div>
+<div class="note">
+  Drag the step slider from 199 down to 0 and watch the arrow field sharpen. Early in the reverse process
+  the density is nearly Gaussian and the arrows all point roughly to the middle, so coarse structure is
+  recovered first. Late in the process the arrows resolve fine detail. A diffusion model builds an image
+  the way a photograph develops: the big shapes arrive before the edges.
+</div>
+</div>
+
+<script>
+"use strict";
+const C={slate:"#47546B",grey:"#8A93A5",amber:"#A96E08",blue:"#4E7291",red:"#9E3B2C",
+         green:"#2E7D4F",purple:"#5B4B9E",key:"#EDF0F5",line:"#E3E8F0"};
+const el=id=>document.getElementById(id);
+const NSTEP=200;
+
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function gauss(r){let u=0,v=0;while(u===0)u=r();while(v===0)v=r();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
+/* ==================================================================
+   The data is a MIXTURE OF GAUSSIANS, chosen so that the score of the
+   noised distribution has a closed form. If
+
+       p0 = sum_k w_k N(mu_k, s^2 I)
+
+   then after the forward step  x_t = sqrt(ab) x_0 + sqrt(1-ab) eps,
+
+       p_t = sum_k w_k N(sqrt(ab) mu_k, (ab s^2 + 1 - ab) I)
+
+   which is another mixture, so its score is exact. No training required,
+   and no approximation hiding anywhere on this page.
+   ================================================================== */
+function componentsFor(shape){
+  const mus=[];
+  if(shape==="moons"){
+    for(let i=0;i<14;i++){const t=Math.PI*i/13;
+      mus.push([1.15*Math.cos(t)-0.55,1.15*Math.sin(t)-0.35]);}
+    for(let i=0;i<14;i++){const t=Math.PI*i/13;
+      mus.push([1.15*Math.cos(t+Math.PI)+0.55,1.15*Math.sin(t+Math.PI)+0.35]);}
+  }else if(shape==="ring"){
+    for(let i=0;i<18;i++){const t=2*Math.PI*i/18;
+      mus.push([1.35*Math.cos(t),1.35*Math.sin(t)]);}
+  }else{
+    for(const p of [[-1.1,-1.1],[1.1,-1.1],[-1.1,1.1],[1.1,1.1]]) mus.push(p);
+  }
+  return {mus,sigma:shape==="four"?0.30:0.17};
+}
+const SCHED=(()=>{const beta=[],alpha=[],ab=[];let c=1;
+  for(let i=0;i<NSTEP;i++){const b=1e-4+(0.06-1e-4)*i/(NSTEP-1);
+    beta.push(b);alpha.push(1-b);c*=(1-b);ab.push(c);}
+  return {beta,alpha,ab};})();
+
+function sampleData(shape,n,seed){
+  const {mus,sigma}=componentsFor(shape),r=mulberry32(seed),out=[];
+  for(let i=0;i<n;i++){const m=mus[Math.floor(r()*mus.length)];
+    out.push([m[0]+sigma*gauss(r),m[1]+sigma*gauss(r)]);}
+  return out;
+}
+function noiseTo(pts,t,seed){
+  if(t<=0)return pts.map(p=>p.slice());
+  const ab=SCHED.ab[Math.min(t,NSTEP-1)],r=mulberry32(seed);
+  const s=Math.sqrt(ab),q=Math.sqrt(1-ab);
+  return pts.map(p=>[s*p[0]+q*gauss(r),s*p[1]+q*gauss(r)]);
+}
+/* the exact score of the noised mixture */
+function scoreAt(x,y,t,shape){
+  const {mus,sigma}=componentsFor(shape);
+  const ab=SCHED.ab[Math.min(Math.max(t,0),NSTEP-1)];
+  const var_=ab*sigma*sigma+(1-ab), s=Math.sqrt(ab);
+  let wsum=0,gx=0,gy=0,best=-1e30;
+  const lg=[];
+  for(const m of mus){
+    const dx=x-s*m[0],dy=y-s*m[1];
+    const l=-(dx*dx+dy*dy)/(2*var_);
+    lg.push(l); if(l>best)best=l;
+  }
+  mus.forEach((m,k)=>{
+    const w=Math.exp(lg[k]-best); wsum+=w;
+    gx+=w*(-(x-s*m[0])/var_); gy+=w*(-(y-s*m[1])/var_);
+  });
+  return [gx/wsum,gy/wsum];
+}
+function reverseSample(shape,nRev,n,seed,temp,keep){
+  const r=mulberry32(seed);
+  let pts=[];for(let i=0;i<n;i++)pts.push([gauss(r),gauss(r)]);
+  const stride=Math.max(1,Math.floor(NSTEP/nRev));
+  const snaps={};
+  for(let t=NSTEP-1;t>=0;t-=stride){
+    // Clamp the effective step. With a large stride, beta*stride can exceed 1,
+    // which would make the variance factor negative and produce NaN. A coarse
+    // sampler is an approximation, not a licence to leave the valid range.
+    const b=Math.min(SCHED.beta[t]*stride,0.9), a=1-b, ab=SCHED.ab[t];
+    pts=pts.map(p=>{
+      const sc=scoreAt(p[0],p[1],t,shape);
+      // x <- (x + b * score) / sqrt(a), then re-inject a little noise
+      let nx=(p[0]+b*sc[0])/Math.sqrt(a), ny=(p[1]+b*sc[1])/Math.sqrt(a);
+      if(t-stride>=0){nx+=temp*Math.sqrt(b)*gauss(r);ny+=temp*Math.sqrt(b)*gauss(r);}
+      return [nx,ny];
+    });
+    if(keep&&keep.includes(t))snaps[t]=pts.map(p=>p.slice());
+  }
+  return {pts,snaps};
+}
+function energyDistance(A,B,seed){
+  const r=mulberry32(seed||1),m=Math.min(220,A.length,B.length);
+  const pick=(X)=>{const c=X.slice();for(let i=c.length-1;i>0;i--){
+    const j=Math.floor(r()*(i+1));[c[i],c[j]]=[c[j],c[i]];}return c.slice(0,m);};
+  const a=pick(A),b=pick(B);
+  const md=(U,V)=>{let s=0;for(const u of U)for(const v of V)s+=Math.hypot(u[0]-v[0],u[1]-v[1]);
+    return s/(U.length*V.length);};
+  return 2*md(a,b)-md(a,a)-md(b,b);
+}
+
+function fit(cv,h){const w=cv.parentElement.clientWidth-20,dpr=devicePixelRatio||1;
+  cv.width=Math.max(120,Math.round(w*dpr));cv.height=Math.round(h*dpr);cv.style.height=h+"px";
+  const x=cv.getContext("2d");x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);return {x,w,h};}
+function scatter(x,w,h,pts,col,rad,alpha){
+  const S=Math.min(w,h)/7.6,cx=w/2,cy=h/2;
+  x.globalAlpha=alpha||0.6;x.fillStyle=col;
+  for(const p of pts){x.beginPath();x.arc(cx+p[0]*S,cy-p[1]*S,rad||2.6,0,7);x.fill();}
+  x.globalAlpha=1;}
+
+/* ============ TAB 1 ============ */
+let DATA=null,fwdTimer=null;
+function refreshData(){DATA=sampleData(el("shape").value,900,11);}
+function drawFwd(){
+  const t=+el("step").value,shape=el("shape").value;
+  const pts=noiseTo(DATA,t,7);
+  {const {x,w,h}=fit(el("cFwd"),360);
+   x.strokeStyle=C.line;x.strokeRect(0.5,0.5,w-1,h-1);
+   scatter(x,w,h,pts,C.slate,2.6,0.55);}
+  const ab=t<=0?1:SCHED.ab[Math.min(t,NSTEP-1)];
+  const sig=Math.sqrt(ab)*100, noi=Math.sqrt(1-ab)*100;
+  el("sSig").textContent=sig.toFixed(1)+"%";
+  el("sNoise").textContent=noi.toFixed(1)+"%";
+  const r=mulberry32(3),eq=[];
+  for(let i=0;i<900;i++)eq.push([gauss(r),gauss(r)]);
+  const d=energyDistance(pts,eq,5);
+  el("sEq").textContent=d.toFixed(4);
+  el("sState").textContent=t===0?"the data":(t>=180?"equilibrium":"dissolving");
+  el("sState").style.color=t===0?C.green:(t>=180?C.red:C.amber);
+  {const {x,w,h}=fit(el("cSig"),180);
+   const L=44,R=10,Tp=12,B=26,pw=w-L-R,ph=h-Tp-B;
+   x.strokeStyle=C.line;
+   for(let g=0;g<=4;g++){const yy=Tp+g/4*ph;x.beginPath();x.moveTo(L,yy);x.lineTo(L+pw,yy);x.stroke();}
+   x.strokeStyle=C.slate;x.lineWidth=2.4;x.beginPath();
+   for(let i=0;i<NSTEP;i++){const xx=L+i/(NSTEP-1)*pw,yy=Tp+ph-Math.sqrt(SCHED.ab[i])*ph;
+     i?x.lineTo(xx,yy):x.moveTo(xx,yy);}
+   x.stroke();
+   x.strokeStyle=C.red;x.lineWidth=1.6;
+   const xx=L+Math.min(t,NSTEP-1)/(NSTEP-1)*pw;
+   x.beginPath();x.moveTo(xx,Tp);x.lineTo(xx,Tp+ph);x.stroke();
+   x.fillStyle=C.grey;x.font="10px Helvetica";x.textAlign="right";
+   x.fillText("1.0",L-4,Tp+6);x.fillText("0.0",L-4,Tp+ph+3);
+   x.textAlign="center";x.fillText("forward step",L+pw/2,h-6);
+   x.fillStyle=C.slate;x.font="700 11px Helvetica";x.textAlign="left";
+   x.fillText("fraction of the original signal",L+8,Tp+14);}
+  el("fwdMath").textContent=
+`x_t = sqrt(ab_t) x_0  +  sqrt(1 - ab_t) eps
+
+at step ${t}
+  ab_t          = ${ab.toFixed(6)}
+  signal factor = ${Math.sqrt(ab).toFixed(4)}
+  noise  factor = ${Math.sqrt(1-ab).toFixed(4)}
+
+nothing on this tab is learned`;
+}
+
+/* ============ TAB 2 ============ */
+let REV=null;
+function runReverse(keep){
+  const shape=el("shape").value;
+  const {pts,snaps}=reverseSample(shape,+el("rsteps").value,700,21,+el("temp").value,keep);
+  REV={pts,snaps};
+  const real=sampleData(shape,700,77), real2=sampleData(shape,700,78);
+  const ed=energyDistance(pts,real,9), floor=energyDistance(real,real2,9);
+  el("sED").textContent=ed.toFixed(4);
+  el("sFloor").textContent=floor.toFixed(4);
+  const times=ed/Math.max(floor,1e-9);
+  el("sTimes").textContent=times.toFixed(2)+"x";
+  el("sTimes").style.color=times<2?C.green:(times<5?C.amber:C.red);
+  el("sRstep").textContent="0 (done)";
+  drawRev(pts);
+}
+function drawRev(pts){
+  const {x,w,h}=fit(el("cRev"),380);
+  x.strokeStyle=C.line;x.strokeRect(0.5,0.5,w-1,h-1);
+  scatter(x,w,h,sampleData(el("shape").value,700,77),C.grey,2.4,0.30);
+  scatter(x,w,h,pts,C.amber,2.7,0.65);
+  x.fillStyle=C.grey;x.font="700 11.5px Helvetica";x.textAlign="left";
+  x.fillText("the real data",12,20);
+  x.fillStyle=C.amber;x.fillText("generated from pure noise",100,20);
+}
+function animateReverse(){
+  const shape=el("shape").value,nRev=+el("rsteps").value,temp=+el("temp").value;
+  const stride=Math.max(1,Math.floor(NSTEP/nRev));
+  const keep=[];for(let t=NSTEP-1;t>=0;t-=stride)keep.push(t);
+  const {snaps}=reverseSample(shape,nRev,700,21,temp,keep);
+  let i=0;
+  const timer=setInterval(()=>{
+    if(i>=keep.length){clearInterval(timer);runReverse(null);return;}
+    const t=keep[i];
+    drawRev(snaps[t]||[]);
+    el("sRstep").textContent=t;
+    i++;
+  },40);
+}
+
+/* ============ TAB 3 ============ */
+function drawScore(){
+  const t=+el("sstep").value,shape=el("shape").value;
+  el("sstepVal").textContent=t;
+  const {x,w,h}=fit(el("cScore"),420);
+  const S=Math.min(w,h)/7.6,cx=w/2,cy=h/2;
+  if(el("showdata").checked)
+    scatter(x,w,h,noiseTo(sampleData(shape,700,11),t,7),C.amber,2.3,0.32);
+  const n=17;
+  for(let i=0;i<n;i++)for(let j=0;j<n;j++){
+    const gx=-2.6+5.2*i/(n-1), gy=-2.6+5.2*j/(n-1);
+    const s=scoreAt(gx,gy,t,shape);
+    const mag=Math.hypot(s[0],s[1])+1e-9;
+    const ux=s[0]/mag,uy=s[1]/mag;
+    const px=cx+gx*S,py=cy-gy*S,len=11;
+    x.strokeStyle=C.slate;x.globalAlpha=0.75;x.lineWidth=1.5;
+    x.beginPath();x.moveTo(px,py);x.lineTo(px+ux*len,py-uy*len);x.stroke();
+    x.fillStyle=C.slate;
+    x.beginPath();x.arc(px+ux*len,py-uy*len,1.7,0,7);x.fill();
+    x.globalAlpha=1;
+  }
+  const ab=SCHED.ab[Math.min(t,NSTEP-1)];
+  el("scoreMath").textContent=
+`the score
+
+  s(x, t) = grad log p_t(x)
+
+it points towards higher density, so
+following it moves a sample towards
+where the data lives
+
+at step ${t}
+  signal factor  ${Math.sqrt(ab).toFixed(4)}
+  the density is ${ab>0.85?"still nearly the data":(ab<0.2?"nearly a plain Gaussian":"in between")}
+
+a real diffusion model LEARNS this field
+by predicting the noise it added;
+this page computes it exactly, because
+the data here is a Gaussian mixture`;
+}
+
+/* ============ wiring ============ */
+document.querySelectorAll(".tab").forEach(b=>{b.onclick=()=>{
+  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("on"));
+  b.classList.add("on");
+  for(const t of ["fwd","rev","score"]) el("tab-"+t).classList.toggle("hide",t!==b.dataset.tab);
+  if(b.dataset.tab==="fwd")drawFwd();
+  if(b.dataset.tab==="rev"&&REV)drawRev(REV.pts);
+  if(b.dataset.tab==="score")drawScore();};});
+el("step").oninput=()=>{el("stepVal").textContent=el("step").value;drawFwd();};
+el("shape").onchange=()=>{refreshData();REV=null;drawFwd();};
+el("rewind").onclick=()=>{el("step").value=0;el("stepVal").textContent="0";drawFwd();};
+el("play").onclick=()=>{
+  if(fwdTimer){clearInterval(fwdTimer);fwdTimer=null;el("play").textContent="Run forwards";return;}
+  el("play").textContent="Pause";
+  fwdTimer=setInterval(()=>{
+    let v=+el("step").value+2;
+    if(v>NSTEP){v=NSTEP;clearInterval(fwdTimer);fwdTimer=null;el("play").textContent="Run forwards";}
+    el("step").value=v;el("stepVal").textContent=v;drawFwd();},45);};
+el("rsteps").oninput=()=>el("rstepsVal").textContent=el("rsteps").value;
+el("temp").oninput=()=>el("tempVal").textContent=(+el("temp").value).toFixed(2);
+el("gen").onclick=()=>{el("gen").textContent="working...";
+  setTimeout(()=>{runReverse(null);el("gen").textContent="Generate";},20);};
+el("anim").onclick=()=>{animateReverse();};
+el("sstep").oninput=drawScore;
+el("showdata").onchange=drawScore;
+addEventListener("resize",()=>{drawFwd();});
+refreshData();drawFwd();
+</script>
+</body>
+</html>

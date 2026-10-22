@@ -1,0 +1,9 @@
+# Week 5 Lab. That is the whole list.
+#
+# No deep learning library is needed or used. A physics loss requires the
+# derivative of a network with respect to its INPUT, and then the derivative of
+# that, so the lab builds a 250-line automatic differentiation engine instead.
+numpy>=1.26
+pandas>=2.0
+matplotlib>=3.7
+notebook>=7.0

@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<!--
+  PINN Sandbox
+  The Evolution of Machine Learning and AI, Week 5
+  South East Technological University
+
+  This page TRAINS A REAL PHYSICS-INFORMED NEURAL NETWORK in your browser. It is
+  not a replay of precomputed curves. The script below contains a small
+  reverse-mode automatic differentiation engine, deliberately mirroring
+  week5-lab/autodiff.py, so that the second derivative in the residual is
+  computed the same way the Python lab computes it.
+
+  Change the equation, the collocation points, the network or the loss weights
+  and press Train. What you watch is gradient descent solving a differential
+  equation without ever being shown its solution.
+
+  Single file, no build step, no network access. Embed with:
+  <iframe src="pinn-sandbox.html" width="100%" height="1080" style="border:0"></iframe>
+
+  Booklet cross-references: Chapters 8 to 12.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PINN Sandbox</title>
+<style>
+  :root{
+    --slate:#47546B; --slate-dark:#333F53; --ink:#22293A; --grey:#8A93A5;
+    --amber:#A96E08; --blue:#4E7291; --red:#9E3B2C; --green:#2E7D4F;
+    --purple:#5B4B9E; --key:#EDF0F5; --panel:#F7F9FC; --line:#E3E8F0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:18px;color:var(--ink);background:#fff;
+       font:15px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}
+  h1{font-size:20px;margin:0 0 2px;color:var(--slate-dark)}
+  .sub{color:var(--grey);font-size:13px;margin-bottom:14px}
+  .tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid var(--line);flex-wrap:wrap}
+  .tab{padding:8px 14px;cursor:pointer;font-size:14px;font-weight:600;color:var(--grey);
+       border:0;background:none;border-bottom:3px solid transparent}
+  .tab.on{color:var(--slate-dark);border-bottom-color:var(--amber)}
+  .controls{display:flex;flex-wrap:wrap;gap:15px;align-items:flex-end;background:var(--panel);
+    border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-bottom:12px}
+  .ctl{display:flex;flex-direction:column;gap:3px;min-width:140px}
+  .ctl label{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--grey)}
+  .ctl .val{font-weight:700;color:var(--slate-dark);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--slate)}
+  select{padding:5px;border:1px solid var(--grey);border-radius:4px;background:#fff;font-size:13.5px}
+  button{padding:8px 15px;border:0;border-radius:5px;cursor:pointer;font-size:13.5px;
+         font-weight:600;color:#fff;background:var(--slate)}
+  button.ghost{background:#fff;color:var(--slate);border:1px solid var(--grey)}
+  button:disabled{opacity:.45;cursor:default}
+  label.chk{display:flex;gap:6px;align-items:center;font-size:13.5px;text-transform:none;letter-spacing:0}
+  .card{border:1px solid var(--line);border-radius:6px;padding:9px;background:#fff;margin-bottom:12px}
+  .card h2{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--grey);margin:2px 0 3px 3px}
+  .card p.cap{font-size:12px;color:var(--grey);margin:2px 3px 7px}
+  canvas{width:100%;display:block;border-radius:4px}
+  .panes{display:grid;gap:12px}
+  .p2{grid-template-columns:1.45fr 1fr}
+  @media(max-width:980px){.p2{grid-template-columns:1fr}}
+  .readout{display:grid;grid-template-columns:repeat(auto-fit,minmax(122px,1fr));gap:10px;margin-top:4px}
+  .stat{background:var(--key);border-radius:5px;padding:9px 11px}
+  .stat .k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--grey)}
+  .stat .v{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--slate-dark)}
+  .msg{margin-top:10px;padding:11px 13px;border-radius:5px;border-left:4px solid var(--slate);
+       background:var(--key);font-size:14.5px}
+  .note{margin-top:12px;font-size:13px;color:var(--grey)}
+  .hide{display:none}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;background:var(--panel);
+        border:1px solid var(--line);border-radius:5px;padding:9px 10px;color:var(--slate-dark);
+        white-space:pre;overflow-x:auto}
+  table.kt{border-collapse:collapse;width:100%;font-size:12.5px}
+  table.kt td,table.kt th{border:1px solid var(--line);padding:4px 7px;text-align:right}
+  table.kt th{background:var(--key);color:var(--slate-dark);font-size:11px;text-transform:uppercase;
+              letter-spacing:.05em;text-align:left}
+  table.kt td:first-child,table.kt th:first-child{text-align:left}
+  .eqn{font-size:17px;text-align:center;padding:8px;color:var(--slate-dark)}
+</style>
+</head>
+<body>
+
+<h1>PINN Sandbox</h1>
+<div class="sub">Week 5 &middot; The Evolution of Machine Learning and AI &middot; booklet chapters 8 to 12 &middot;
+  <b>this page trains a real network in your browser</b></div>
+
+<div class="tabs">
+  <button class="tab on" data-tab="train">1. Train a PINN</button>
+  <button class="tab" data-tab="compare">2. Physics against data</button>
+  <button class="tab" data-tab="wrong">3. When the physics is wrong</button>
+</div>
+
+<!-- ==================== TAB 1 ==================== -->
+<div id="tab-train">
+<div class="controls">
+  <div class="ctl">
+    <label for="c">Damping c &ndash; <span class="val" id="cVal">0.20</span></label>
+    <input type="range" id="c" min="0" max="1.2" step="0.02" value="0.2">
+  </div>
+  <div class="ctl">
+    <label for="k">Stiffness k &ndash; <span class="val" id="kVal">1.00</span></label>
+    <input type="range" id="k" min="0.2" max="4" step="0.05" value="1">
+  </div>
+  <div class="ctl">
+    <label for="ncol">Collocation points &ndash; <span class="val" id="ncolVal">60</span></label>
+    <input type="range" id="ncol" min="6" max="160" step="2" value="60">
+  </div>
+  <div class="ctl">
+    <label for="hid">Hidden width &ndash; <span class="val" id="hidVal">24</span></label>
+    <input type="range" id="hid" min="4" max="48" step="4" value="24">
+  </div>
+  <div class="ctl">
+    <label for="lr">Learning rate &ndash; <span class="val" id="lrVal">0.008</span></label>
+    <input type="range" id="lr" min="-3.3" max="-1.3" step="0.05" value="-2.1">
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>Initial condition</label>
+    <label class="chk"><input type="checkbox" id="hard" checked> impose it exactly (hard constraint)</label>
+    <label class="chk"><input type="checkbox" id="showres"> show the residual</label>
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>&nbsp;</label>
+    <div style="display:flex;gap:6px">
+      <button id="train">Train</button>
+      <button id="stepBtn" class="ghost">+200 epochs</button>
+      <button id="reset" class="ghost">Reset</button>
+    </div>
+  </div>
+</div>
+
+<div class="panes p2">
+  <div class="card">
+    <h2>The solution, as it is being learned</h2>
+    <p class="cap">Grey is the exact answer, which the network never sees. Slate is what it currently believes.
+    The small marks along the axis are the collocation points, the only places the equation is checked.</p>
+    <canvas id="cSol" height="330"></canvas>
+  </div>
+  <div class="card">
+    <h2>The loss</h2>
+    <p class="cap">Purely the mean squared violation of the equation. There is no data term at all.</p>
+    <canvas id="cLoss" height="150"></canvas>
+    <div class="mono" id="mathBox" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<div class="readout">
+  <div class="stat"><div class="k">Epochs</div><div class="v" id="sEp">0</div></div>
+  <div class="stat"><div class="k">Physics loss</div><div class="v" id="sLoss">-</div></div>
+  <div class="stat"><div class="k">True RMSE</div><div class="v" id="sRmse">-</div></div>
+  <div class="stat"><div class="k">Observations used</div><div class="v" id="sObs">0</div></div>
+  <div class="stat"><div class="k">Parameters</div><div class="v" id="sPar">-</div></div>
+</div>
+
+<div class="msg" id="msg1">Press <b>Train</b>. Watch the true RMSE fall even though the loss being minimised
+never mentions the true solution. The network is not being shown the answer; it is being told what the
+answer must <b>satisfy</b>.</div>
+
+<div class="note">
+  <b>Worth doing.</b> Drag <b>collocation points</b> down to about 10 and retrain. The loss still reaches a
+  small value, because the equation really is satisfied at those ten places, and the curve between them
+  wanders. That is the failure mode to understand: a PINN's loss tells you about the points you chose, and
+  nothing whatsoever about the points you did not. Then untick <b>impose it exactly</b> and watch a whole
+  new problem appear, which tab 1 of the booklet's Chapter 10 discusses: the trivial solution u = 0
+  satisfies the equation perfectly, so only the initial condition stands between you and nonsense.
+</div>
+</div>
+
+<!-- ==================== TAB 2 ==================== -->
+<div id="tab-compare" class="hide">
+<div class="controls">
+  <div class="ctl">
+    <label for="nobs">Noisy observations &ndash; <span class="val" id="nobsVal">12</span></label>
+    <input type="range" id="nobs" min="2" max="40" step="1" value="12">
+  </div>
+  <div class="ctl">
+    <label for="noise">Measurement noise &ndash; <span class="val" id="noiseVal">0.05</span></label>
+    <input type="range" id="noise" min="0" max="0.4" step="0.01" value="0.05">
+  </div>
+  <div class="ctl">
+    <label for="tsplit">Data only up to t = <span class="val" id="tsplitVal">4.0</span></label>
+    <input type="range" id="tsplit" min="2" max="10" step="0.5" value="4">
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>&nbsp;</label>
+    <div style="display:flex;gap:6px">
+      <button id="train2">Train both</button>
+      <button id="reset2" class="ghost">Reset</button>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <h2>The same network twice. Only the loss differs.</h2>
+  <p class="cap">Both models see exactly the same observations. One also knows the equation, everywhere,
+  including where there are no measurements at all.</p>
+  <canvas id="cCmp" height="360"></canvas>
+</div>
+<div class="readout">
+  <div class="stat"><div class="k">Data-only, where data was</div><div class="v" id="sD1">-</div></div>
+  <div class="stat"><div class="k">Data-only, beyond it</div><div class="v" id="sD2">-</div></div>
+  <div class="stat"><div class="k">Physics, where data was</div><div class="v" id="sP1">-</div></div>
+  <div class="stat"><div class="k">Physics, beyond it</div><div class="v" id="sP2">-</div></div>
+</div>
+<div class="msg" id="msg2">Drag the split to the left so the data covers less of the interval. The data-only
+model has no opinion worth having beyond its last measurement, and it does not know that it has no opinion.
+The physics-informed model carries on, because the equation was known there too.</div>
+</div>
+
+<!-- ==================== TAB 3 ==================== -->
+<div id="tab-wrong" class="hide">
+<div class="controls">
+  <div class="ctl">
+    <label for="cw">Damping the model is TOLD &ndash; <span class="val" id="cwVal">0.60</span></label>
+    <input type="range" id="cw" min="0" max="1.4" step="0.05" value="0.6">
+  </div>
+  <div class="ctl" style="min-width:auto">
+    <label>&nbsp;</label>
+    <div style="display:flex;gap:6px">
+      <button id="train3">Train</button>
+      <button id="reset3" class="ghost">Reset</button>
+    </div>
+  </div>
+  <div class="ctl" style="min-width:200px">
+    <label>The truth</label>
+    <div style="font-size:14px;padding-top:6px">The real system always has <b>c = 0.20</b>.</div>
+  </div>
+</div>
+<div class="card">
+  <h2>A confidently wrong answer</h2>
+  <p class="cap">The model is given real observations from the real system, and a false belief about the
+  damping.</p>
+  <canvas id="cWrong" height="340"></canvas>
+</div>
+<div class="readout">
+  <div class="stat"><div class="k">Error against the truth</div><div class="v" id="sW1">-</div></div>
+  <div class="stat"><div class="k">Physics loss it reports</div><div class="v" id="sW2">-</div></div>
+  <div class="stat"><div class="k">Data loss it reports</div><div class="v" id="sW3">-</div></div>
+  <div class="stat"><div class="k">Verdict</div><div class="v" id="sW4" style="font-size:14px">-</div></div>
+</div>
+<div class="msg" id="msg3">Set the assumed damping well away from 0.20 and train. The error against the truth
+climbs, and the two numbers you would actually be monitoring stay small. <b>This is the failure mode that
+matters most</b>, because nothing on your dashboard goes red.</div>
+<div class="note">
+  A physical prior is only worth the extent to which it is true, exactly as Week 4's architectural priors
+  were. The difference is that a wrong physical prior is more dangerous than a wrong architectural one,
+  because it comes with the authority of an equation and a loss that looks healthy.
+</div>
+</div>
+
+<script>
+"use strict";
+const C={slate:"#47546B",grey:"#8A93A5",amber:"#A96E08",blue:"#4E7291",red:"#9E3B2C",
+         green:"#2E7D4F",purple:"#5B4B9E",key:"#EDF0F5",line:"#E3E8F0"};
+const el=id=>document.getElementById(id);
+const T_MAX=10.0, M_MASS=1.0;
+
+/* ==================================================================
+   A REVERSE-MODE AUTODIFF ENGINE, in about 120 lines.
+
+   This deliberately mirrors week5-lab/autodiff.py. Every backward function
+   returns NODES rather than numbers, so a gradient is itself differentiable
+   and the second derivative in the residual is available. That single design
+   decision is the whole reason a PINN can be trained at all.
+
+   Matrices are stored flat: {r, c, d} with d a Float64Array of length r*c.
+   ================================================================== */
+function T(r,c,d){return {r,c,d:d||new Float64Array(r*c)};}
+function tzeros(r,c){return T(r,c);}
+class N{
+  constructor(v,parents,vjp){this.v=v;this.parents=parents||[];this.vjp=vjp||null;}
+}
+function con(x){return x instanceof N?x:new N(x);}
+
+function mmul(A,B){ // (r,k)x(k,c)
+  const out=T(A.r,B.c);
+  for(let i=0;i<A.r;i++)for(let k=0;k<A.c;k++){
+    const a=A.d[i*A.c+k]; if(a===0)continue;
+    for(let j=0;j<B.c;j++) out.d[i*B.c+j]+=a*B.d[k*B.c+j];
+  }
+  return out;
+}
+function mT(A){const o=T(A.c,A.r);for(let i=0;i<A.r;i++)for(let j=0;j<A.c;j++)o.d[j*A.r+i]=A.d[i*A.c+j];return o;}
+function ew(A,B,f){const o=T(A.r,A.c);for(let i=0;i<A.d.length;i++)o.d[i]=f(A.d[i],B?B.d[i]:0);return o;}
+function sumRows(A){const o=T(1,A.c);for(let i=0;i<A.r;i++)for(let j=0;j<A.c;j++)o.d[j]+=A.d[i*A.c+j];return o;}
+function bcast(A,r){const o=T(r,A.c);for(let i=0;i<r;i++)for(let j=0;j<A.c;j++)o.d[i*A.c+j]=A.d[j];return o;}
+
+const OPS={
+  matmul(a,b){a=con(a);b=con(b);
+    return new N(mmul(a.v,b.v),[a,b],g=>[OPS.matmul(g,OPS.trans(b)),OPS.matmul(OPS.trans(a),g)]);},
+  trans(a){a=con(a); return new N(mT(a.v),[a],g=>[OPS.trans(g)]);},
+  addRow(a,b){a=con(a);b=con(b); // b is (1,c) broadcast down
+    return new N(ew(a.v,bcast(b.v,a.v.r),(x,y)=>x+y),[a,b],
+      g=>[g,new N(sumRows(g.v),[g],gg=>[new N(bcast(gg.v,g.v.r),[gg],null)])]);},
+  add(a,b){a=con(a);b=con(b); return new N(ew(a.v,b.v,(x,y)=>x+y),[a,b],g=>[g,g]);},
+  sub(a,b){a=con(a);b=con(b); return new N(ew(a.v,b.v,(x,y)=>x-y),[a,b],g=>[g,OPS.scale(g,-1)]);},
+  mul(a,b){a=con(a);b=con(b);
+    return new N(ew(a.v,b.v,(x,y)=>x*y),[a,b],g=>[OPS.mul(g,b),OPS.mul(g,a)]);},
+  div(a,b){a=con(a);b=con(b);
+    return new N(ew(a.v,b.v,(x,y)=>x/y),[a,b],
+      g=>[OPS.div(g,b),OPS.scale(OPS.div(OPS.mul(g,a),OPS.mul(b,b)),-1)]);},
+  scale(a,s){a=con(a); return new N(ew(a.v,null,x=>x*s),[a],g=>[OPS.scale(g,s)]);},
+  shift(a,s){a=con(a); return new N(ew(a.v,null,x=>x+s),[a],g=>[g]);},
+  tanh(a){a=con(a); const t=ew(a.v,null,Math.tanh);
+    return new N(t,[a],g=>[OPS.mul(g,OPS.shift(OPS.scale(OPS.mul(OPS.tanh(a),OPS.tanh(a)),-1),1))]);},
+  square(a){a=con(a); return OPS.mul(a,a);},
+  mean(a){a=con(a); const n=a.v.d.length; let s=0; for(let i=0;i<n;i++)s+=a.v.d[i];
+    return new N(T(1,1,Float64Array.from([s/n])),[a],
+      g=>[new N(ew(a.v,null,()=>g.v.d[0]/n),[g],null)]);},
+  sumAll(a){a=con(a); let s=0; for(let i=0;i<a.v.d.length;i++)s+=a.v.d[i];
+    return new N(T(1,1,Float64Array.from([s])),[a],
+      g=>[new N(ew(a.v,null,()=>g.v.d[0]),[g],null)]);},
+};
+
+function topo(out){const order=[],seen=new Set();
+  (function visit(n){ if(seen.has(n))return; seen.add(n);
+    for(const p of n.parents) visit(p); order.push(n); })(out);
+  return order;}
+
+function gradOf(out,wrt){
+  const grads=new Map();
+  grads.set(out,new N(T(out.v.r,out.v.c,ew(out.v,null,()=>1).d)));
+  const order=topo(out);
+  for(let i=order.length-1;i>=0;i--){
+    const nd=order[i], g=grads.get(nd);
+    if(!g||!nd.vjp) continue;
+    const parts=nd.vjp(g);
+    nd.parents.forEach((p,j)=>{ const c=parts[j]; if(!c)return;
+      grads.set(p, grads.has(p)?OPS.add(grads.get(p),c):c); });
+  }
+  return wrt.map(w=>grads.get(w)||new N(tzeros(w.v.r,w.v.c)));
+}
+
+/* ---------------- the network ---------------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function makeNet(hidden,seed){
+  const rnd=mulberry32(seed||1);
+  const dims=[[1,hidden],[hidden,hidden],[hidden,1]];
+  const Ws=[],bs=[];
+  for(const [i,o] of dims){
+    const lim=Math.sqrt(6/(i+o)), W=T(i,o), b=T(1,o);
+    for(let q=0;q<W.d.length;q++)W.d[q]=(rnd()*2-1)*lim;
+    Ws.push(new N(W)); bs.push(new N(b));
+  }
+  return {Ws,bs,params:[...Ws,...bs],
+          nParams:Ws.reduce((s,w)=>s+w.v.d.length,0)+bs.reduce((s,b)=>s+b.v.d.length,0)};
+}
+function forwardRaw(net,tn){
+  let x=tn;
+  for(let i=0;i<net.Ws.length;i++){
+    x=OPS.addRow(OPS.matmul(x,net.Ws[i]),net.bs[i]);
+    if(i<net.Ws.length-1) x=OPS.tanh(x);
+  }
+  return x;
+}
+/* u(t) = 1 + s(t) N(t) with s = t^2/(1+t^2), so u(0)=1 and u'(0)=0 exactly. */
+function forwardU(net,tNode,hard){
+  const tn=OPS.shift(OPS.scale(tNode,2/T_MAX),-1);
+  const raw=forwardRaw(net,tn);
+  if(!hard) return raw;
+  const t2=OPS.mul(tNode,tNode);
+  const s=OPS.div(t2,OPS.shift(t2,1));
+  return OPS.shift(OPS.mul(s,raw),1);
+}
+
+/* ---------------- Adam ---------------- */
+function makeAdam(params,lr){
+  return {t:0,lr,m:params.map(p=>tzeros(p.v.r,p.v.c)),v:params.map(p=>tzeros(p.v.r,p.v.c)),
+    step(gs){this.t++;
+      params.forEach((p,i)=>{const g=gs[i].v;
+        for(let q=0;q<p.v.d.length;q++){
+          this.m[i].d[q]=0.9*this.m[i].d[q]+0.1*g.d[q];
+          this.v[i].d[q]=0.999*this.v[i].d[q]+0.001*g.d[q]*g.d[q];
+          const mh=this.m[i].d[q]/(1-Math.pow(0.9,this.t));
+          const vh=this.v[i].d[q]/(1-Math.pow(0.999,this.t));
+          p.v.d[q]-=this.lr*mh/(Math.sqrt(vh)+1e-8);
+        }});}};
+}
+
+/* ---------------- the exact solution, for scoring only ---------------- */
+function exact(t,c,k){
+  const w=Math.sqrt(k/M_MASS), z=c/(2*Math.sqrt(k*M_MASS));
+  if(z>=1){ // over-damped: fall back to the real-root form
+    const r1=(-c+Math.sqrt(c*c-4*k))/2, r2=(-c-Math.sqrt(c*c-4*k))/2;
+    const A=(0-r2)/(r1-r2), B=1-A;
+    return t.map(x=>A*Math.exp(r1*x)+B*Math.exp(r2*x));
+  }
+  const wd=w*Math.sqrt(1-z*z), B=(z*w)/wd;
+  return t.map(x=>Math.exp(-z*w*x)*(Math.cos(wd*x)+B*Math.sin(wd*x)));
+}
+
+/* ---------------- state ---------------- */
+let S={net:null,opt:null,ep:0,hist:[],timer:null,tcol:null,obs:null};
+
+function colPoints(n){const a=new Float64Array(n);
+  for(let i=0;i<n;i++)a[i]=i*T_MAX/(n-1); return T(n,1,a);}
+
+function buildLoss(net,tcolNode,c,k,hard,obs,wData){
+  const u=forwardU(net,tcolNode,hard);
+  const ut=gradOf(OPS.sumAll(u),[tcolNode])[0];
+  const utt=gradOf(OPS.sumAll(ut),[tcolNode])[0];
+  const res=OPS.add(OPS.add(OPS.scale(utt,M_MASS),OPS.scale(ut,c)),OPS.scale(u,k));
+  let loss=OPS.mean(OPS.square(res));
+  const phys=loss.v.d[0];
+  let dataL=0;
+  if(obs){
+    const uo=forwardU(net,obs.tNode,hard);
+    const dl=OPS.mean(OPS.square(OPS.sub(uo,obs.yNode)));
+    dataL=dl.v.d[0];
+    loss=OPS.add(loss,OPS.scale(dl,wData));
+  }
+  return {loss,phys,dataL,res};
+}
+
+function trainSteps(nSteps,cfg){
+  for(let i=0;i<nSteps;i++){
+    const tNode=new N(T(S.tcol.r,1,Float64Array.from(S.tcol.d)));
+    const {loss}=buildLoss(S.net,tNode,cfg.c,cfg.k,cfg.hard,S.obs,cfg.wData||1);
+    const gs=gradOf(loss,S.net.params);
+    S.opt.step(gs);
+    S.ep++;
+    if(S.ep%10===0) S.hist.push(loss.v.d[0]);
+  }
+}
+
+function predict(net,ts,hard){
+  const tNode=new N(T(ts.length,1,Float64Array.from(ts)));
+  return Array.from(forwardU(net,tNode,hard).v.d);
+}
+function rmseOf(net,c,k,hard,lo,hi){
+  const n=200,ts=[];
+  for(let i=0;i<n;i++)ts.push(lo+(hi-lo)*i/(n-1));
+  const p=predict(net,ts,hard), e=exact(ts,c,k);
+  let s=0; for(let i=0;i<n;i++)s+=(p[i]-e[i])**2;
+  return Math.sqrt(s/n);
+}
+
+/* ---------------- drawing ---------------- */
+function fit(cv,h){const w=cv.parentElement.clientWidth-20,dpr=devicePixelRatio||1;
+  cv.width=Math.max(120,Math.round(w*dpr));cv.height=Math.round(h*dpr);cv.style.height=h+"px";
+  const x=cv.getContext("2d");x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);return {x,w,h};}
+
+function plotSolution(){
+  const c=+el("c").value,k=+el("k").value,hard=el("hard").checked;
+  const {x,w,h}=fit(el("cSol"),330);
+  const L=48,R=12,Tp=14,B=34,pw=w-L-R,ph=h-Tp-B;
+  const ts=[];for(let i=0;i<300;i++)ts.push(T_MAX*i/299);
+  const ex=exact(ts,c,k);
+  const pr=S.net?predict(S.net,ts,hard):null;
+  let lo=-1.35,hi=1.35;
+  if(pr){for(const v of pr){if(isFinite(v)){lo=Math.min(lo,v);hi=Math.max(hi,v);}}}
+  lo=Math.max(lo,-3);hi=Math.min(hi,3);
+  const X=t=>L+t/T_MAX*pw, Y=v=>Tp+ph-(v-lo)/(hi-lo)*ph;
+  x.strokeStyle=C.line;
+  for(let g=0;g<=4;g++){const yy=Tp+g/4*ph;x.beginPath();x.moveTo(L,yy);x.lineTo(L+pw,yy);x.stroke();}
+  x.strokeStyle=C.grey;x.setLineDash([3,3]);x.beginPath();x.moveTo(L,Y(0));x.lineTo(L+pw,Y(0));x.stroke();x.setLineDash([]);
+  // collocation ticks
+  for(let i=0;i<S.tcol.r;i++){const tv=S.tcol.d[i];
+    x.strokeStyle=C.amber;x.lineWidth=1;x.beginPath();
+    x.moveTo(X(tv),Tp+ph);x.lineTo(X(tv),Tp+ph-7);x.stroke();}
+  // exact
+  x.strokeStyle=C.grey;x.lineWidth=3.4;x.beginPath();
+  ts.forEach((t,i)=>i?x.lineTo(X(t),Y(ex[i])):x.moveTo(X(t),Y(ex[i])));x.stroke();
+  // prediction
+  if(pr){x.strokeStyle=C.slate;x.lineWidth=2.1;x.setLineDash([6,4]);x.beginPath();
+    ts.forEach((t,i)=>i?x.lineTo(X(t),Y(pr[i])):x.moveTo(X(t),Y(pr[i])));x.stroke();x.setLineDash([]);}
+  // residual
+  if(el("showres").checked&&S.net){
+    const tNode=new N(T(S.tcol.r,1,Float64Array.from(S.tcol.d)));
+    const {res}=buildLoss(S.net,tNode,c,k,hard,null,0);
+    let mx=1e-9;for(const v of res.v.d)mx=Math.max(mx,Math.abs(v));
+    x.strokeStyle=C.red;x.lineWidth=1.6;x.beginPath();
+    for(let i=0;i<S.tcol.r;i++){const yy=Tp+ph-((res.v.d[i]/mx)*0.5+0.5)*ph*0.28-2;
+      i?x.lineTo(X(S.tcol.d[i]),yy):x.moveTo(X(S.tcol.d[i]),yy);}
+    x.stroke();
+    x.fillStyle=C.red;x.font="10.5px Helvetica";x.textAlign="left";
+    x.fillText("residual (scaled)",L+4,Tp+ph-4);
+  }
+  x.fillStyle=C.grey;x.font="10.5px Helvetica";x.textAlign="center";
+  [0,2,4,6,8,10].forEach(t=>x.fillText(t,X(t),h-B+16));
+  x.fillText("time t",L+pw/2,h-B+30);
+  x.textAlign="left";
+  x.fillStyle=C.grey;x.fillText("exact",L+6,Tp+12);
+  x.fillStyle=C.slate;x.fillText("the PINN",L+50,Tp+12);
+  x.fillStyle=C.amber;x.fillText("| collocation points",L+120,Tp+12);
+}
+
+function plotLoss(){
+  const {x,w,h}=fit(el("cLoss"),150);
+  const L=52,R=10,Tp=10,B=24,pw=w-L-R,ph=h-Tp-B;
+  if(S.hist.length<2){x.fillStyle=C.grey;x.font="12px Helvetica";
+    x.fillText("press Train",L+8,Tp+ph/2);return;}
+  const lg=S.hist.map(v=>Math.log10(Math.max(v,1e-12)));
+  const lo=Math.min(...lg),hi=Math.max(...lg);
+  x.strokeStyle=C.line;
+  for(let g=0;g<=3;g++){const yy=Tp+g/3*ph;x.beginPath();x.moveTo(L,yy);x.lineTo(L+pw,yy);x.stroke();
+    x.fillStyle=C.grey;x.font="9.5px Helvetica";x.textAlign="right";
+    x.fillText("1e"+(hi-(hi-lo)*g/3).toFixed(1),L-4,yy+3);}
+  x.strokeStyle=C.purple;x.lineWidth=2.2;x.beginPath();
+  lg.forEach((v,i)=>{const xx=L+i/(lg.length-1)*pw,yy=Tp+ph-(v-lo)/((hi-lo)||1)*ph;
+    i?x.lineTo(xx,yy):x.moveTo(xx,yy);});
+  x.stroke();
+  x.fillStyle=C.grey;x.textAlign="center";x.font="10px Helvetica";
+  x.fillText("epochs",L+pw/2,h-4);
+}
+
+function updateReadout(){
+  const c=+el("c").value,k=+el("k").value,hard=el("hard").checked;
+  el("sEp").textContent=S.ep;
+  el("sPar").textContent=S.net?S.net.nParams:"-";
+  el("sObs").textContent="0";
+  if(S.net&&S.hist.length){
+    el("sLoss").textContent=S.hist[S.hist.length-1].toExponential(2);
+    const r=rmseOf(S.net,c,k,hard,0,T_MAX);
+    el("sRmse").textContent=r.toExponential(2);
+    el("sRmse").style.color=r<0.01?C.green:(r<0.1?C.amber:C.red);
+  }
+  const w=Math.sqrt(k/M_MASS), z=c/(2*Math.sqrt(k*M_MASS));
+  el("mathBox").textContent=
+`the equation being enforced
+
+  ${M_MASS} u''(t) + ${c.toFixed(2)} u'(t) + ${k.toFixed(2)} u(t) = 0
+
+  u(0) = 1     u'(0) = 0
+
+natural frequency  ${w.toFixed(3)}
+damping ratio      ${z.toFixed(3)}  ${z>=1?"(over-damped)":"(under-damped)"}
+
+the loss
+
+  mean( (m u'' + c u' + k u)^2 )
+  over ${S.tcol?S.tcol.r:0} collocation points
+
+observations of u used: 0`;
+}
+
+function resetRun(){
+  stopTrain();
+  S.net=makeNet(+el("hid").value,7);
+  S.opt=makeAdam(S.net.params,Math.pow(10,+el("lr").value));
+  S.ep=0;S.hist=[];S.obs=null;
+  S.tcol=colPoints(+el("ncol").value);
+  plotSolution();plotLoss();updateReadout();
+}
+function stopTrain(){if(S.timer){clearInterval(S.timer);S.timer=null;}el("train").textContent="Train";}
+function startTrain(){
+  if(S.timer)return stopTrain();
+  el("train").textContent="Pause";
+  const cfg={c:+el("c").value,k:+el("k").value,hard:el("hard").checked};
+  S.timer=setInterval(()=>{
+    trainSteps(45,cfg);
+    plotSolution();plotLoss();updateReadout();
+    if(S.ep>=3500)stopTrain();
+  },16);
+}
+
+/* ==================== TAB 2 ==================== */
+let S2={a:null,b:null};
+function runCompare(){
+  const nobs=+el("nobs").value,noise=+el("noise").value,split=+el("tsplit").value;
+  const c=0.2,k=1.0;
+  const rnd=mulberry32(11);
+  const to=[],yo=[];
+  for(let i=0;i<nobs;i++){const t=split*i/(Math.max(nobs-1,1));to.push(t);}
+  const ey=exact(to,c,k);
+  for(let i=0;i<nobs;i++){
+    let u=0,v=0;while(u===0)u=rnd();while(v===0)v=rnd();
+    yo.push(ey[i]+noise*Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v));
+  }
+  const obs={tNode:new N(T(nobs,1,Float64Array.from(to))),
+             yNode:new N(T(nobs,1,Float64Array.from(yo))),to,yo};
+  const tcol=colPoints(80);
+
+  function run(usePhysics){
+    const net=makeNet(24,7), opt=makeAdam(net.params,0.008);
+    for(let e=0;e<1400;e++){
+      const tN=new N(T(tcol.r,1,Float64Array.from(tcol.d)));
+      let loss;
+      if(usePhysics){ loss=buildLoss(net,tN,c,k,true,obs,1).loss; }
+      else{ const uo=forwardU(net,obs.tNode,false);
+            loss=OPS.mean(OPS.square(OPS.sub(uo,obs.yNode))); }
+      opt.step(gradOf(loss,net.params));
+      if(e===840||e===1180) opt.lr*=0.3;
+    }
+    return net;
+  }
+  S2.a=run(false); S2.b=run(true); S2.hard=true; S2.obs=obs; S2.split=split;
+  drawCompare();
+}
+function drawCompare(){
+  const {x,w,h}=fit(el("cCmp"),360);
+  const L=48,R=12,Tp=14,B=34,pw=w-L-R,ph=h-Tp-B;
+  const c=0.2,k=1.0,split=S2.split||4;
+  const ts=[];for(let i=0;i<300;i++)ts.push(T_MAX*i/299);
+  const ex=exact(ts,c,k);
+  const lo=-1.6,hi=1.6;
+  const X=t=>L+t/T_MAX*pw,Y=v=>Tp+ph-(v-lo)/(hi-lo)*ph;
+  x.fillStyle="rgba(78,114,145,0.07)";x.fillRect(L,Tp,X(split)-L,ph);
+  x.fillStyle="rgba(158,59,44,0.06)";x.fillRect(X(split),Tp,L+pw-X(split),ph);
+  x.strokeStyle=C.grey;x.lineWidth=3.4;x.beginPath();
+  ts.forEach((t,i)=>i?x.lineTo(X(t),Y(ex[i])):x.moveTo(X(t),Y(ex[i])));x.stroke();
+  if(S2.a){
+    const pa=predict(S2.a,ts,false),pb=predict(S2.b,ts,true);
+    x.strokeStyle=C.amber;x.lineWidth=2.1;x.beginPath();
+    ts.forEach((t,i)=>i?x.lineTo(X(t),Y(Math.max(lo,Math.min(hi,pa[i])))):x.moveTo(X(t),Y(pa[i])));x.stroke();
+    x.strokeStyle=C.slate;x.lineWidth=2.1;x.setLineDash([6,4]);x.beginPath();
+    ts.forEach((t,i)=>i?x.lineTo(X(t),Y(Math.max(lo,Math.min(hi,pb[i])))):x.moveTo(X(t),Y(pb[i])));x.stroke();x.setLineDash([]);
+    el("sD1").textContent=rmseOf(S2.a,c,k,false,0,split).toFixed(3);
+    el("sD2").textContent=rmseOf(S2.a,c,k,false,split,T_MAX).toFixed(3);
+    el("sP1").textContent=rmseOf(S2.b,c,k,true,0,split).toFixed(3);
+    el("sP2").textContent=rmseOf(S2.b,c,k,true,split,T_MAX).toFixed(3);
+    el("sD2").style.color=C.red; el("sP2").style.color=C.green;
+  }
+  if(S2.obs){x.fillStyle=C.red;
+    S2.obs.to.forEach((t,i)=>{x.beginPath();x.arc(X(t),Y(S2.obs.yo[i]),3.4,0,7);x.fill();});}
+  x.strokeStyle=C.red;x.setLineDash([4,3]);x.lineWidth=1.5;
+  x.beginPath();x.moveTo(X(split),Tp);x.lineTo(X(split),Tp+ph);x.stroke();x.setLineDash([]);
+  x.fillStyle=C.blue;x.font="11.5px Helvetica";x.textAlign="center";
+  x.fillText("data available here",L+(X(split)-L)/2,Tp+14);
+  x.fillStyle=C.red;x.fillText("no data ever seen here",X(split)+(L+pw-X(split))/2,Tp+14);
+  x.fillStyle=C.amber;x.textAlign="left";x.fillText("data-only",L+6,Tp+ph-8);
+  x.fillStyle=C.slate;x.fillText("physics + the same data",L+80,Tp+ph-8);
+}
+
+/* ==================== TAB 3 ==================== */
+function runWrong(){
+  const cAssumed=+el("cw").value, cTrue=0.2, k=1.0;
+  const rnd=mulberry32(5);
+  const nobs=20,to=[],yo=[];
+  for(let i=0;i<nobs;i++)to.push(T_MAX*i/(nobs-1));
+  const ey=exact(to,cTrue,k);
+  for(let i=0;i<nobs;i++){let u=0,v=0;while(u===0)u=rnd();while(v===0)v=rnd();
+    yo.push(ey[i]+0.03*Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v));}
+  const obs={tNode:new N(T(nobs,1,Float64Array.from(to))),
+             yNode:new N(T(nobs,1,Float64Array.from(yo))),to,yo};
+  const tcol=colPoints(80);
+  const net=makeNet(24,7),opt=makeAdam(net.params,0.008);
+  let phys=0,dataL=0;
+  for(let e=0;e<1400;e++){
+    const tN=new N(T(tcol.r,1,Float64Array.from(tcol.d)));
+    const r=buildLoss(net,tN,cAssumed,k,true,obs,1);
+    phys=r.phys; dataL=r.dataL;
+    opt.step(gradOf(r.loss,net.params));
+    if(e===840||e===1180)opt.lr*=0.3;
+  }
+  const err=rmseOf(net,cTrue,k,true,0,T_MAX);
+  el("sW1").textContent=err.toFixed(3);
+  el("sW1").style.color=err>0.08?C.red:C.green;
+  el("sW2").textContent=phys.toExponential(1);
+  el("sW3").textContent=dataL.toExponential(1);
+  const bad=Math.abs(cAssumed-cTrue)>0.08;
+  el("sW4").textContent=bad?"confidently wrong":"correct";
+  el("sW4").style.color=bad?C.red:C.green;
+  drawWrong(net,obs,cTrue,k);
+}
+function drawWrong(net,obs,cTrue,k){
+  const {x,w,h}=fit(el("cWrong"),340);
+  const L=48,R=12,Tp=14,B=34,pw=w-L-R,ph=h-Tp-B;
+  const ts=[];for(let i=0;i<300;i++)ts.push(T_MAX*i/299);
+  const ex=exact(ts,cTrue,k), pr=predict(net,ts,true);
+  const lo=-1.5,hi=1.5;
+  const X=t=>L+t/T_MAX*pw,Y=v=>Tp+ph-(Math.max(lo,Math.min(hi,v))-lo)/(hi-lo)*ph;
+  x.strokeStyle=C.line;
+  for(let g=0;g<=4;g++){const yy=Tp+g/4*ph;x.beginPath();x.moveTo(L,yy);x.lineTo(L+pw,yy);x.stroke();}
+  x.strokeStyle=C.grey;x.lineWidth=3.4;x.beginPath();
+  ts.forEach((t,i)=>i?x.lineTo(X(t),Y(ex[i])):x.moveTo(X(t),Y(ex[i])));x.stroke();
+  x.strokeStyle=C.red;x.lineWidth=2.2;x.setLineDash([6,4]);x.beginPath();
+  ts.forEach((t,i)=>i?x.lineTo(X(t),Y(pr[i])):x.moveTo(X(t),Y(pr[i])));x.stroke();x.setLineDash([]);
+  x.fillStyle=C.slate;
+  obs.to.forEach((t,i)=>{x.beginPath();x.arc(X(t),Y(obs.yo[i]),3.2,0,7);x.fill();});
+  x.font="11.5px Helvetica";x.textAlign="left";
+  x.fillStyle=C.grey;x.fillText("the truth (c = 0.20)",L+6,Tp+14);
+  x.fillStyle=C.red;x.fillText("what the model believes",L+150,Tp+14);
+  x.fillStyle=C.slate;x.fillText("real observations",L+320,Tp+14);
+}
+
+/* ==================== wiring ==================== */
+document.querySelectorAll(".tab").forEach(b=>{b.onclick=()=>{
+  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("on"));
+  b.classList.add("on");
+  for(const t of ["train","compare","wrong"]) el("tab-"+t).classList.toggle("hide",t!==b.dataset.tab);
+  if(b.dataset.tab==="train"){plotSolution();plotLoss();}
+  if(b.dataset.tab==="compare")drawCompare();
+};});
+el("train").onclick=startTrain;
+el("stepBtn").onclick=()=>{stopTrain();
+  trainSteps(200,{c:+el("c").value,k:+el("k").value,hard:el("hard").checked});
+  plotSolution();plotLoss();updateReadout();};
+el("reset").onclick=resetRun;
+["c","k"].forEach(id=>el(id).oninput=()=>{
+  el(id+"Val").textContent=(+el(id).value).toFixed(2);plotSolution();updateReadout();});
+el("ncol").oninput=()=>{el("ncolVal").textContent=el("ncol").value;
+  S.tcol=colPoints(+el("ncol").value);plotSolution();updateReadout();};
+el("hid").oninput=()=>{el("hidVal").textContent=el("hid").value;resetRun();};
+el("lr").oninput=()=>{el("lrVal").textContent=Math.pow(10,+el("lr").value).toFixed(4);
+  if(S.opt)S.opt.lr=Math.pow(10,+el("lr").value);};
+el("hard").onchange=resetRun;
+el("showres").onchange=plotSolution;
+el("train2").onclick=()=>{el("train2").textContent="training...";
+  setTimeout(()=>{runCompare();el("train2").textContent="Train both";},20);};
+el("reset2").onclick=()=>{S2={a:null,b:null};drawCompare();};
+["nobs","noise","tsplit"].forEach(id=>el(id).oninput=()=>{
+  el(id+"Val").textContent=(+el(id).value).toFixed(id==="nobs"?0:(id==="noise"?2:1));});
+el("train3").onclick=()=>{el("train3").textContent="training...";
+  setTimeout(()=>{runWrong();el("train3").textContent="Train";},20);};
+el("reset3").onclick=()=>{["sW1","sW2","sW3","sW4"].forEach(i=>el(i).textContent="-");};
+el("cw").oninput=()=>el("cwVal").textContent=(+el("cw").value).toFixed(2);
+addEventListener("resize",()=>{plotSolution();plotLoss();drawCompare();});
+resetRun();
+</script>
+</body>
+</html>
